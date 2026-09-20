@@ -27,7 +27,11 @@ function Install-Service($name, $exe, $arguments, $dir, $extraEnv) {
     & $nssm set $name AppStdout (Join-Path $AppDir "logs\$name.out.log") | Out-Null
     & $nssm set $name AppStderr (Join-Path $AppDir "logs\$name.err.log") | Out-Null
     & $nssm set $name AppRotateFiles 1 | Out-Null
+    & $nssm set $name AppRotateOnline 1 | Out-Null   # rotate while running; default only rotates at service start
     & $nssm set $name AppRotateBytes 10485760 | Out-Null
+    # 24/7: always restart the app if it exits, after a short pause (this is also NSSM's default).
+    & $nssm set $name AppExit Default Restart | Out-Null
+    & $nssm set $name AppRestartDelay 5000 | Out-Null
     if ($extraEnv) { & $nssm set $name AppEnvironmentExtra $extraEnv | Out-Null }
     Write-Host "installed $name"
 }
@@ -41,4 +45,4 @@ Install-Service "MT5MonitorWeb" $node "--env-file=.env .output\server\index.mjs"
 
 & $nssm start MT5MonitorConnector | Out-Null
 & $nssm start MT5MonitorWeb | Out-Null
-Write-Host "started. Check: curl http://127.0.0.1:8765/health ; curl -I http://127.0.0.1:3000/"
+Write-Host "started. Check (PowerShell): Invoke-RestMethod http://127.0.0.1:8765/health ; (Invoke-WebRequest http://127.0.0.1:3000/ -UseBasicParsing).StatusCode"

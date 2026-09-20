@@ -76,8 +76,13 @@ Caddyfile (e.g. `C:\apps\trade-intel\Caddyfile`) and run
 
 ## 5. Verify
 
-1. `curl http://127.0.0.1:8765/health` → `{"status":"ok","mode":"real"}`
-2. `curl -I http://127.0.0.1:3000/` → `200`
+1. `Invoke-RestMethod http://127.0.0.1:8765/health` → `status ok`, `mode real`
+   (in Windows PowerShell `curl` is an alias that rejects `-I`; use these cmdlets or `curl.exe`)
+2. `(Invoke-WebRequest http://127.0.0.1:3000/ -UseBasicParsing).StatusCode` → `200`
+   and `nssm status MT5MonitorConnector; nssm status MT5MonitorWeb` → both `SERVICE_RUNNING`
+   Live polling: `Get-Content logs\MT5MonitorConnector.out.log -Tail 20` shows
+   `POST /v1/clients/positions … 200 OK` (request lines are in `out.log`, start-up lines in `err.log`);
+   `503` means that broker's Manager server is refusing this IP.
 3. `https://monitor.itsrotex.com` loads with a valid certificate; log in.
 4. Brokers → **Test connection** → search a client → open positions (this is the first real MT5 test).
 5. Add a monitored client: the first poll stores a baseline (no alert); then trigger a change →
