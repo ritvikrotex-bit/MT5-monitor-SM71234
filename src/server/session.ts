@@ -1,8 +1,14 @@
-import { createHash, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
 import { ApiError } from "./errors";
-import { env, envOptional } from "./env";
-import { dataFile } from "./paths";
+import { env } from "./env";
+import {
+  findUserByEmailOrUsername,
+  getUserById,
+  recordUserLogin,
+  verifyPassword,
+  type UserRole,
+  type UserStatus,
+} from "./user-store";
+import { logAudit } from "./audit-store";
 
 const COOKIE = "mt5_monitor_session";
 
@@ -10,6 +16,9 @@ export type SessionUser = {
   id: string;
   email: string;
   name: string;
+  username: string;
+  role: UserRole;
+  status: UserStatus;
 };
 
 type SessionPayload = SessionUser & { exp: number };
@@ -76,15 +85,53 @@ export async function readSession(request: Request): Promise<SessionUser | null>
   try {
     const payload = JSON.parse(fromB64url(body)) as SessionPayload;
     if (payload.exp < Date.now()) return null;
-    return { id: payload.id, email: payload.email, name: payload.name };
+    return {
+      id: payload.id,
+      email: payload.email,
+      name: payload.name,
+      username: payload.username || payload.email.split("@")[0] || "",
+      role: payload.role || "USER",
+      status: payload.status || "ACTIVE",
+    };
   } catch {
     return null;
   }
 }
 
 export async function requireUser(request: Request): Promise<SessionUser> {
-  const user = await readSession(request);
-  if (!user) throw new ApiError("UNAUTHORIZED", "Sign in required.", 401);
+  const session = await readSession(request);
+  if (!session) throw new ApiError("UNAUTHORIZED", "Sign in required.", 401);
+
+  // Validate live status from user database
+  const live = getUserById(session.id);
+  if (!live || live.status === "DELETED") {
+    throw new ApiError("UNAUTHORIZED", "Account not found or deleted.", 401);
+  }
+  if (live.status === "PENDING") {
+    throw new ApiError("FORBIDDEN", "Your account is awaiting approval.", 403);
+  }
+  if (live.status === "SUSPENDED") {
+    throw new ApiError("FORBIDDEN", "Your account has been suspended.", 403);
+  }
+  if (live.role === "USER" && !live.permissions?.canLogin) {
+    throw new ApiError("FORBIDDEN", "Login permission has been revoked for this account.", 403);
+  }
+
+  return {
+    id: live.id,
+    email: live.email,
+    name: live.name,
+    username: live.username,
+    role: live.role,
+    status: live.status,
+  };
+}
+
+export async function requireAdmin(request: Request): Promise<SessionUser> {
+  const user = await requireUser(request);
+  if (user.role !== "ADMIN") {
+    throw new ApiError("FORBIDDEN", "Administrative privilege required.", 403);
+  }
   return user;
 }
 
@@ -104,77 +151,115 @@ export function clearSessionCookie(request: Request): string {
   return `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`;
 }
 
-type StoredUser = {
-  email: string;
-  password: string;
-  name: string;
-  id: string;
-};
+export function authenticateUser(
+  identifier: string,
+  password: string,
+  requiredRole?: UserRole,
+  ipAddress?: string,
+): SessionUser {
+  const cleanId = (identifier || "").trim();
+  const found = findUserByEmailOrUsername(cleanId);
 
-// Operator accounts come from data/users.json and the optional MONITOR_AUTH_EMAIL/PASSWORD env pair.
-function getUsers(): StoredUser[] {
-  const users: StoredUser[] = [];
-
-  // data/users.json (hand-edited, so tolerate a UTF-8 BOM from Windows editors/PowerShell)
-  try {
-    const file = dataFile("users.json");
-    if (existsSync(file)) {
-      const text = readFileSync(file, "utf-8").replace(/^\uFEFF/, "");
-      const parsed = JSON.parse(text) as Partial<StoredUser>[];
-      if (Array.isArray(parsed)) {
-        for (const u of parsed) {
-          if (
-            u.email &&
-            u.password &&
-            !users.some((x) => x.email.toLowerCase() === u.email!.toLowerCase())
-          ) {
-            users.push({
-              email: u.email,
-              password: u.password,
-              name: u.name || u.email.split("@")[0] || "Operator",
-              id: "local-operator",
-            });
-          }
-        }
-      }
-    }
-  } catch (error) {
-    // Never fail silently: a broken users.json means nobody can log in.
-    console.error("[MT5 Auth] Could not read data/users.json:", error);
-  }
-
-  const envEmail = envOptional("MONITOR_AUTH_EMAIL");
-  const envPassword = envOptional("MONITOR_AUTH_PASSWORD");
-  if (
-    envEmail &&
-    envPassword &&
-    !users.some((u) => u.email.toLowerCase() === envEmail.toLowerCase())
-  ) {
-    users.push({
-      email: envEmail,
-      password: envPassword,
-      name: envEmail.split("@")[0] || "Operator",
-      id: "local-operator",
+  if (!found || !verifyPassword(password, found.passwordHash)) {
+    logAudit({
+      actorId: found?.id || "anonymous",
+      actorEmail: cleanId,
+      actorRole: found?.role || "USER",
+      action: "USER_LOGIN_FAILED",
+      targetType: "USER",
+      targetId: found?.id,
+      details: { reason: "INVALID_CREDENTIALS" },
+      ipAddress,
     });
+    throw new ApiError("UNAUTHORIZED", "Invalid email/username or password.", 401);
   }
 
-  return users;
-}
+  if (found.status === "PENDING") {
+    logAudit({
+      actorId: found.id,
+      actorEmail: found.email,
+      actorRole: found.role,
+      action: "USER_LOGIN_FAILED",
+      targetType: "USER",
+      targetId: found.id,
+      details: { reason: "ACCOUNT_PENDING" },
+      ipAddress,
+    });
+    throw new ApiError(
+      "ACCOUNT_PENDING",
+      "Your account is pending administrator approval. Please wait for an administrator to activate your account.",
+      403,
+    );
+  }
 
-// Hash both sides so the comparison is constant-time regardless of length.
-function passwordMatches(stored: string, supplied: string): boolean {
-  const digest = (value: string) => createHash("sha256").update(value).digest();
-  return timingSafeEqual(digest(stored), digest(supplied));
+  if (found.status === "SUSPENDED") {
+    logAudit({
+      actorId: found.id,
+      actorEmail: found.email,
+      actorRole: found.role,
+      action: "USER_LOGIN_FAILED",
+      targetType: "USER",
+      targetId: found.id,
+      details: { reason: "ACCOUNT_SUSPENDED" },
+      ipAddress,
+    });
+    throw new ApiError(
+      "ACCOUNT_SUSPENDED",
+      "Your account has been suspended. Please contact an administrator.",
+      403,
+    );
+  }
+
+  if (found.status === "DELETED") {
+    throw new ApiError("ACCOUNT_DELETED", "This account has been deleted.", 403);
+  }
+
+  if (found.role === "USER" && !found.permissions.canLogin) {
+    throw new ApiError("LOGIN_DISABLED", "Login access has been revoked for this account.", 403);
+  }
+
+  if (requiredRole && found.role !== requiredRole) {
+    if (requiredRole === "ADMIN") {
+      logAudit({
+        actorId: found.id,
+        actorEmail: found.email,
+        actorRole: found.role,
+        action: "USER_LOGIN_FAILED",
+        targetType: "USER",
+        targetId: found.id,
+        details: { reason: "ROLE_MISMATCH_EXPECTED_ADMIN" },
+        ipAddress,
+      });
+      throw new ApiError(
+        "FORBIDDEN",
+        "Administrative privilege required. Please use the Client Login tab.",
+        403,
+      );
+    }
+  }
+
+  recordUserLogin(found.id);
+  logAudit({
+    actorId: found.id,
+    actorEmail: found.email,
+    actorRole: found.role,
+    action: "USER_LOGIN",
+    targetType: "USER",
+    targetId: found.id,
+    details: { role: found.role },
+    ipAddress,
+  });
+
+  return {
+    id: found.id,
+    email: found.email,
+    name: found.name,
+    username: found.username,
+    role: found.role,
+    status: found.status,
+  };
 }
 
 export function authenticateLocal(email: string, password: string): SessionUser {
-  const users = getUsers();
-  const normalized = email.trim().toLowerCase();
-  const found = users.find(
-    (u) => u.email.trim().toLowerCase() === normalized && passwordMatches(u.password, password),
-  );
-  if (!found) {
-    throw new ApiError("UNAUTHORIZED", "Invalid email or password.", 401);
-  }
-  return { id: found.id, email: found.email, name: found.name };
+  return authenticateUser(email, password);
 }

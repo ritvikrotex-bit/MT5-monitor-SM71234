@@ -2,13 +2,34 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { envOptional } from "./env";
 import type { StoredAlert } from "./notification-store";
+import { isPostgresConfigured, query } from "./db";
 import { dataFile } from "./paths";
 
 function telegramConfigFile(): string {
   return dataFile("telegram.json");
 }
 
+let memoryTelegramConfig: { botToken: string; chatId: string } | null = null;
+
+if (isPostgresConfigured()) {
+  void (async () => {
+    try {
+      const rows = await query<{ bot_token: string; chat_id: string }>(
+        "SELECT bot_token, chat_id FROM telegram_config WHERE id = 'primary' LIMIT 1",
+      );
+      const row = rows[0];
+      if (row?.bot_token && row.chat_id) {
+        memoryTelegramConfig = { botToken: row.bot_token, chatId: row.chat_id };
+      }
+    } catch (err) {
+      console.error("[PostgreSQL] Hydration error for telegram_config:", err);
+    }
+  })();
+}
+
 export function getTelegramConfig(): { botToken: string; chatId: string } | null {
+  if (memoryTelegramConfig) return memoryTelegramConfig;
+
   const file = telegramConfigFile();
   if (existsSync(file)) {
     try {
@@ -16,7 +37,10 @@ export function getTelegramConfig(): { botToken: string; chatId: string } | null
         botToken?: string;
         chatId?: string;
       };
-      if (data.botToken && data.chatId) return { botToken: data.botToken, chatId: data.chatId };
+      if (data.botToken && data.chatId) {
+        memoryTelegramConfig = { botToken: data.botToken, chatId: data.chatId };
+        return memoryTelegramConfig;
+      }
     } catch {
       // Malformed telegram.json: fall through to the TELEGRAM_* env vars.
     }
@@ -28,14 +52,30 @@ export function getTelegramConfig(): { botToken: string; chatId: string } | null
 }
 
 export function saveTelegramConfig(botToken: string, chatId: string): void {
+  const cleanToken = botToken.trim();
+  const cleanChatId = chatId.trim();
+  memoryTelegramConfig = { botToken: cleanToken, chatId: cleanChatId };
+
   const file = telegramConfigFile();
   const dir = dirname(file);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   writeFileSync(
     file,
-    JSON.stringify({ botToken: botToken.trim(), chatId: chatId.trim() }, null, 2),
+    JSON.stringify({ botToken: cleanToken, chatId: cleanChatId }, null, 2),
     "utf-8",
   );
+
+  if (isPostgresConfigured()) {
+    void query(
+      `INSERT INTO telegram_config (id, bot_token, chat_id, updated_at)
+       VALUES ('primary', $1, $2, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         bot_token = EXCLUDED.bot_token,
+         chat_id = EXCLUDED.chat_id,
+         updated_at = NOW();`,
+      [cleanToken, cleanChatId],
+    ).catch((err) => console.error("[PostgreSQL] Telegram config sync error:", err));
+  }
 }
 
 export const telegramConfigured = (): boolean => getTelegramConfig() !== null;

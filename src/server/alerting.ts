@@ -13,6 +13,7 @@ import {
 } from "./notification-store";
 import { sendTelegramAlert } from "./telegram";
 import type { SessionUser } from "./session";
+import { getUserById } from "./user-store";
 import { monitorPollIntervalMs } from "./env";
 
 const same = (a: number | null | undefined, b: number | null | undefined) =>
@@ -243,11 +244,35 @@ export async function pollAlertsForUser(user: SessionUser, force = false) {
   return { checked: monitoredList.length, alerts: totalAlerts, skipped: false };
 }
 
+// Users already reported as skipped, so a long outage doesn't spam the log every cycle.
+const skippedUsers = new Set<string>();
+
 export async function pollAllAlerts() {
   const items = listAllMonitored();
   const users = new Map<string, SessionUser>();
   for (const item of items) {
-    users.set(item.userId, { id: item.userId, email: "", name: "Operator" });
+    if (users.has(item.userId)) continue;
+    // Poll only for accounts that are active and still allowed to monitor. A suspended, deleted or
+    // pending account (or one with monitoring revoked) stops generating alerts.
+    const live = getUserById(item.userId);
+    if (!live || live.status !== "ACTIVE" || live.permissions?.canMonitorClients === false) {
+      if (!skippedUsers.has(item.userId)) {
+        skippedUsers.add(item.userId);
+        console.warn(
+          `[MT5 Alerting] Not polling clients of user ${item.userId}: account missing, inactive or monitoring revoked.`,
+        );
+      }
+      continue;
+    }
+    skippedUsers.delete(item.userId);
+    users.set(item.userId, {
+      id: live.id,
+      email: live.email,
+      name: live.name,
+      username: live.username,
+      role: live.role,
+      status: live.status,
+    });
   }
 
   let totalAlerts = 0;

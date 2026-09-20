@@ -37,6 +37,8 @@ const eventOrder: NotificationType[] = [
 
 function SettingsPage() {
   const s = useAppState();
+  // The Telegram bot/chat is one shared setting, so only administrators may change or test it.
+  const isAdmin = s.role === "ADMIN";
   const navigate = useNavigate();
   const [signingOut, setSigningOut] = useState(false);
   const [telegramConfigured, setTelegramConfigured] = useState(false);
@@ -180,32 +182,36 @@ function SettingsPage() {
                   ? chatId
                     ? `Connected to Chat ID: ${chatId}`
                     : "Configured securely on server"
-                  : "Set Telegram Bot Token and Chat ID to receive live trade alerts"
+                  : isAdmin
+                    ? "Set Telegram Bot Token and Chat ID to receive live trade alerts"
+                    : "Not configured yet — ask an administrator to set up the Telegram bot"
               }
               active={telegramConfigured}
               action={
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowTelegramForm((prev) => !prev)}
-                    className="rounded-lg border border-border bg-secondary px-2.5 py-1 text-xs font-medium hover:bg-accent"
-                  >
-                    {showTelegramForm ? "Cancel" : telegramConfigured ? "Edit" : "Configure"}
-                  </button>
-                  {telegramConfigured && (
+                !isAdmin ? null : (
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={handleTestTelegram}
-                      disabled={testingTelegram}
-                      className="rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-50"
+                      onClick={() => setShowTelegramForm((prev) => !prev)}
+                      className="rounded-lg border border-border bg-secondary px-2.5 py-1 text-xs font-medium hover:bg-accent"
                     >
-                      {testingTelegram ? "Sending..." : "Test Bot"}
+                      {showTelegramForm ? "Cancel" : telegramConfigured ? "Edit" : "Configure"}
                     </button>
-                  )}
-                </div>
+                    {telegramConfigured && (
+                      <button
+                        type="button"
+                        onClick={handleTestTelegram}
+                        disabled={testingTelegram}
+                        className="rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-50"
+                      >
+                        {testingTelegram ? "Sending..." : "Test Bot"}
+                      </button>
+                    )}
+                  </div>
+                )
               }
             />
-            {showTelegramForm && (
+            {isAdmin && showTelegramForm && (
               <form
                 onSubmit={handleSaveTelegram}
                 className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3"

@@ -15,6 +15,12 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as MonitoredRouteImport } from './routes/monitored'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
+import { Route as AdminApprovalsRouteImport } from './routes/admin.approvals'
+import { Route as AdminBrokersRouteImport } from './routes/admin.brokers'
+import { Route as AdminLogsRouteImport } from './routes/admin.logs'
+import { Route as AdminMonitoredRouteImport } from './routes/admin.monitored'
+import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as ApiBrokersRouteImport } from './routes/api/brokers'
 import { Route as ApiMonitoredRouteImport } from './routes/api/monitored'
 import { Route as ApiNotificationsRouteImport } from './routes/api/notifications'
@@ -22,11 +28,24 @@ import { Route as ApiSessionRouteImport } from './routes/api/session'
 import { Route as ClientLoginRouteImport } from './routes/client.$login'
 import { Route as NotificationsIndexRouteImport } from './routes/notifications.index'
 import { Route as NotificationsIdRouteImport } from './routes/notifications.$id'
+import { Route as AdminUsersIndexRouteImport } from './routes/admin.users.index'
+import { Route as AdminUsersIdRouteImport } from './routes/admin.users.$id'
+import { Route as ApiAdminBrokersRouteImport } from './routes/api/admin/brokers'
+import { Route as ApiAdminLogsRouteImport } from './routes/api/admin/logs'
+import { Route as ApiAdminMonitoredRouteImport } from './routes/api/admin/monitored'
+import { Route as ApiAdminStatsRouteImport } from './routes/api/admin/stats'
+import { Route as ApiAdminUsersRouteImport } from './routes/api/admin/users'
 import { Route as ApiAlertsPollRouteImport } from './routes/api/alerts/poll'
+import { Route as ApiAuthMeRouteImport } from './routes/api/auth.me'
+import { Route as ApiAuthSignupRouteImport } from './routes/api/auth.signup'
 import { Route as ApiBrokersIdRouteImport } from './routes/api/brokers.$id'
 import { Route as ApiNotificationsTestTelegramRouteImport } from './routes/api/notifications.test-telegram'
+import { Route as ApiAdminUsersIdRouteImport } from './routes/api/admin/users.$id'
 import { Route as ApiBrokersIdStatusRouteImport } from './routes/api/brokers.$id.status'
 import { Route as ApiBrokersIdTestConnectionRouteImport } from './routes/api/brokers.$id.test-connection'
+import { Route as ApiAdminUsersIdLimitsRouteImport } from './routes/api/admin/users.$id.limits'
+import { Route as ApiAdminUsersIdPermissionsRouteImport } from './routes/api/admin/users.$id.permissions'
+import { Route as ApiAdminUsersIdStatusRouteImport } from './routes/api/admin/users.$id.status'
 import { Route as ApiBrokersIdClientsLoginRouteImport } from './routes/api/brokers.$id.clients.$login'
 import { Route as ApiBrokersIdClientsSearchRouteImport } from './routes/api/brokers.$id.clients.search'
 import { Route as ApiBrokersIdClientsLoginPositionsRouteImport } from './routes/api/brokers.$id.clients.$login.positions'
@@ -59,6 +78,36 @@ const SearchRoute = SearchRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/admin/',
+  path: '/admin/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminApprovalsRoute = AdminApprovalsRouteImport.update({
+  id: '/admin/approvals',
+  path: '/admin/approvals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminBrokersRoute = AdminBrokersRouteImport.update({
+  id: '/admin/brokers',
+  path: '/admin/brokers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminLogsRoute = AdminLogsRouteImport.update({
+  id: '/admin/logs',
+  path: '/admin/logs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminMonitoredRoute = AdminMonitoredRouteImport.update({
+  id: '/admin/monitored',
+  path: '/admin/monitored',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminSettingsRoute = AdminSettingsRouteImport.update({
+  id: '/admin/settings',
+  path: '/admin/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiBrokersRoute = ApiBrokersRouteImport.update({
@@ -96,9 +145,54 @@ const NotificationsIdRoute = NotificationsIdRouteImport.update({
   path: '/notifications/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminUsersIndexRoute = AdminUsersIndexRouteImport.update({
+  id: '/admin/users/',
+  path: '/admin/users/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsersIdRoute = AdminUsersIdRouteImport.update({
+  id: '/admin/users/$id',
+  path: '/admin/users/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminBrokersRoute = ApiAdminBrokersRouteImport.update({
+  id: '/api/admin/brokers',
+  path: '/api/admin/brokers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminLogsRoute = ApiAdminLogsRouteImport.update({
+  id: '/api/admin/logs',
+  path: '/api/admin/logs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminMonitoredRoute = ApiAdminMonitoredRouteImport.update({
+  id: '/api/admin/monitored',
+  path: '/api/admin/monitored',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminStatsRoute = ApiAdminStatsRouteImport.update({
+  id: '/api/admin/stats',
+  path: '/api/admin/stats',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminUsersRoute = ApiAdminUsersRouteImport.update({
+  id: '/api/admin/users',
+  path: '/api/admin/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAlertsPollRoute = ApiAlertsPollRouteImport.update({
   id: '/api/alerts/poll',
   path: '/api/alerts/poll',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthMeRoute = ApiAuthMeRouteImport.update({
+  id: '/api/auth/me',
+  path: '/api/auth/me',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthSignupRoute = ApiAuthSignupRouteImport.update({
+  id: '/api/auth/signup',
+  path: '/api/auth/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiBrokersIdRoute = ApiBrokersIdRouteImport.update({
@@ -112,6 +206,11 @@ const ApiNotificationsTestTelegramRoute =
     path: '/test-telegram',
     getParentRoute: () => ApiNotificationsRoute,
   } as any)
+const ApiAdminUsersIdRoute = ApiAdminUsersIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiAdminUsersRoute,
+} as any)
 const ApiBrokersIdStatusRoute = ApiBrokersIdStatusRouteImport.update({
   id: '/status',
   path: '/status',
@@ -123,6 +222,22 @@ const ApiBrokersIdTestConnectionRoute =
     path: '/test-connection',
     getParentRoute: () => ApiBrokersIdRoute,
   } as any)
+const ApiAdminUsersIdLimitsRoute = ApiAdminUsersIdLimitsRouteImport.update({
+  id: '/limits',
+  path: '/limits',
+  getParentRoute: () => ApiAdminUsersIdRoute,
+} as any)
+const ApiAdminUsersIdPermissionsRoute =
+  ApiAdminUsersIdPermissionsRouteImport.update({
+    id: '/permissions',
+    path: '/permissions',
+    getParentRoute: () => ApiAdminUsersIdRoute,
+  } as any)
+const ApiAdminUsersIdStatusRoute = ApiAdminUsersIdStatusRouteImport.update({
+  id: '/status',
+  path: '/status',
+  getParentRoute: () => ApiAdminUsersIdRoute,
+} as any)
 const ApiBrokersIdClientsLoginRoute =
   ApiBrokersIdClientsLoginRouteImport.update({
     id: '/clients/$login',
@@ -149,18 +264,37 @@ export interface FileRoutesByFullPath {
   '/monitored': typeof MonitoredRoute
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
+  '/admin/approvals': typeof AdminApprovalsRoute
+  '/admin/brokers': typeof AdminBrokersRoute
+  '/admin/logs': typeof AdminLogsRoute
+  '/admin/monitored': typeof AdminMonitoredRoute
+  '/admin/settings': typeof AdminSettingsRoute
   '/api/brokers': typeof ApiBrokersRouteWithChildren
   '/api/monitored': typeof ApiMonitoredRoute
   '/api/notifications': typeof ApiNotificationsRouteWithChildren
   '/api/session': typeof ApiSessionRoute
   '/client/$login': typeof ClientLoginRoute
   '/notifications/$id': typeof NotificationsIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/notifications/': typeof NotificationsIndexRoute
+  '/admin/users/$id': typeof AdminUsersIdRoute
+  '/api/admin/brokers': typeof ApiAdminBrokersRoute
+  '/api/admin/logs': typeof ApiAdminLogsRoute
+  '/api/admin/monitored': typeof ApiAdminMonitoredRoute
+  '/api/admin/stats': typeof ApiAdminStatsRoute
+  '/api/admin/users': typeof ApiAdminUsersRouteWithChildren
   '/api/alerts/poll': typeof ApiAlertsPollRoute
+  '/api/auth/me': typeof ApiAuthMeRoute
+  '/api/auth/signup': typeof ApiAuthSignupRoute
   '/api/brokers/$id': typeof ApiBrokersIdRouteWithChildren
   '/api/notifications/test-telegram': typeof ApiNotificationsTestTelegramRoute
+  '/admin/users/': typeof AdminUsersIndexRoute
+  '/api/admin/users/$id': typeof ApiAdminUsersIdRouteWithChildren
   '/api/brokers/$id/status': typeof ApiBrokersIdStatusRoute
   '/api/brokers/$id/test-connection': typeof ApiBrokersIdTestConnectionRoute
+  '/api/admin/users/$id/limits': typeof ApiAdminUsersIdLimitsRoute
+  '/api/admin/users/$id/permissions': typeof ApiAdminUsersIdPermissionsRoute
+  '/api/admin/users/$id/status': typeof ApiAdminUsersIdStatusRoute
   '/api/brokers/$id/clients/$login': typeof ApiBrokersIdClientsLoginRouteWithChildren
   '/api/brokers/$id/clients/search': typeof ApiBrokersIdClientsSearchRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
@@ -172,18 +306,37 @@ export interface FileRoutesByTo {
   '/monitored': typeof MonitoredRoute
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
+  '/admin/approvals': typeof AdminApprovalsRoute
+  '/admin/brokers': typeof AdminBrokersRoute
+  '/admin/logs': typeof AdminLogsRoute
+  '/admin/monitored': typeof AdminMonitoredRoute
+  '/admin/settings': typeof AdminSettingsRoute
   '/api/brokers': typeof ApiBrokersRouteWithChildren
   '/api/monitored': typeof ApiMonitoredRoute
   '/api/notifications': typeof ApiNotificationsRouteWithChildren
   '/api/session': typeof ApiSessionRoute
   '/client/$login': typeof ClientLoginRoute
   '/notifications/$id': typeof NotificationsIdRoute
+  '/admin': typeof AdminIndexRoute
   '/notifications': typeof NotificationsIndexRoute
+  '/admin/users/$id': typeof AdminUsersIdRoute
+  '/api/admin/brokers': typeof ApiAdminBrokersRoute
+  '/api/admin/logs': typeof ApiAdminLogsRoute
+  '/api/admin/monitored': typeof ApiAdminMonitoredRoute
+  '/api/admin/stats': typeof ApiAdminStatsRoute
+  '/api/admin/users': typeof ApiAdminUsersRouteWithChildren
   '/api/alerts/poll': typeof ApiAlertsPollRoute
+  '/api/auth/me': typeof ApiAuthMeRoute
+  '/api/auth/signup': typeof ApiAuthSignupRoute
   '/api/brokers/$id': typeof ApiBrokersIdRouteWithChildren
   '/api/notifications/test-telegram': typeof ApiNotificationsTestTelegramRoute
+  '/admin/users': typeof AdminUsersIndexRoute
+  '/api/admin/users/$id': typeof ApiAdminUsersIdRouteWithChildren
   '/api/brokers/$id/status': typeof ApiBrokersIdStatusRoute
   '/api/brokers/$id/test-connection': typeof ApiBrokersIdTestConnectionRoute
+  '/api/admin/users/$id/limits': typeof ApiAdminUsersIdLimitsRoute
+  '/api/admin/users/$id/permissions': typeof ApiAdminUsersIdPermissionsRoute
+  '/api/admin/users/$id/status': typeof ApiAdminUsersIdStatusRoute
   '/api/brokers/$id/clients/$login': typeof ApiBrokersIdClientsLoginRouteWithChildren
   '/api/brokers/$id/clients/search': typeof ApiBrokersIdClientsSearchRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
@@ -196,18 +349,37 @@ export interface FileRoutesById {
   '/monitored': typeof MonitoredRoute
   '/search': typeof SearchRoute
   '/settings': typeof SettingsRoute
+  '/admin/approvals': typeof AdminApprovalsRoute
+  '/admin/brokers': typeof AdminBrokersRoute
+  '/admin/logs': typeof AdminLogsRoute
+  '/admin/monitored': typeof AdminMonitoredRoute
+  '/admin/settings': typeof AdminSettingsRoute
   '/api/brokers': typeof ApiBrokersRouteWithChildren
   '/api/monitored': typeof ApiMonitoredRoute
   '/api/notifications': typeof ApiNotificationsRouteWithChildren
   '/api/session': typeof ApiSessionRoute
   '/client/$login': typeof ClientLoginRoute
   '/notifications/$id': typeof NotificationsIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/notifications/': typeof NotificationsIndexRoute
+  '/admin/users/$id': typeof AdminUsersIdRoute
+  '/api/admin/brokers': typeof ApiAdminBrokersRoute
+  '/api/admin/logs': typeof ApiAdminLogsRoute
+  '/api/admin/monitored': typeof ApiAdminMonitoredRoute
+  '/api/admin/stats': typeof ApiAdminStatsRoute
+  '/api/admin/users': typeof ApiAdminUsersRouteWithChildren
   '/api/alerts/poll': typeof ApiAlertsPollRoute
+  '/api/auth/me': typeof ApiAuthMeRoute
+  '/api/auth/signup': typeof ApiAuthSignupRoute
   '/api/brokers/$id': typeof ApiBrokersIdRouteWithChildren
   '/api/notifications/test-telegram': typeof ApiNotificationsTestTelegramRoute
+  '/admin/users/': typeof AdminUsersIndexRoute
+  '/api/admin/users/$id': typeof ApiAdminUsersIdRouteWithChildren
   '/api/brokers/$id/status': typeof ApiBrokersIdStatusRoute
   '/api/brokers/$id/test-connection': typeof ApiBrokersIdTestConnectionRoute
+  '/api/admin/users/$id/limits': typeof ApiAdminUsersIdLimitsRoute
+  '/api/admin/users/$id/permissions': typeof ApiAdminUsersIdPermissionsRoute
+  '/api/admin/users/$id/status': typeof ApiAdminUsersIdStatusRoute
   '/api/brokers/$id/clients/$login': typeof ApiBrokersIdClientsLoginRouteWithChildren
   '/api/brokers/$id/clients/search': typeof ApiBrokersIdClientsSearchRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
@@ -221,18 +393,37 @@ export interface FileRouteTypes {
     | '/monitored'
     | '/search'
     | '/settings'
+    | '/admin/approvals'
+    | '/admin/brokers'
+    | '/admin/logs'
+    | '/admin/monitored'
+    | '/admin/settings'
     | '/api/brokers'
     | '/api/monitored'
     | '/api/notifications'
     | '/api/session'
     | '/client/$login'
     | '/notifications/$id'
+    | '/admin/'
     | '/notifications/'
+    | '/admin/users/$id'
+    | '/api/admin/brokers'
+    | '/api/admin/logs'
+    | '/api/admin/monitored'
+    | '/api/admin/stats'
+    | '/api/admin/users'
     | '/api/alerts/poll'
+    | '/api/auth/me'
+    | '/api/auth/signup'
     | '/api/brokers/$id'
     | '/api/notifications/test-telegram'
+    | '/admin/users/'
+    | '/api/admin/users/$id'
     | '/api/brokers/$id/status'
     | '/api/brokers/$id/test-connection'
+    | '/api/admin/users/$id/limits'
+    | '/api/admin/users/$id/permissions'
+    | '/api/admin/users/$id/status'
     | '/api/brokers/$id/clients/$login'
     | '/api/brokers/$id/clients/search'
     | '/api/brokers/$id/clients/$login/positions'
@@ -244,18 +435,37 @@ export interface FileRouteTypes {
     | '/monitored'
     | '/search'
     | '/settings'
+    | '/admin/approvals'
+    | '/admin/brokers'
+    | '/admin/logs'
+    | '/admin/monitored'
+    | '/admin/settings'
     | '/api/brokers'
     | '/api/monitored'
     | '/api/notifications'
     | '/api/session'
     | '/client/$login'
     | '/notifications/$id'
+    | '/admin'
     | '/notifications'
+    | '/admin/users/$id'
+    | '/api/admin/brokers'
+    | '/api/admin/logs'
+    | '/api/admin/monitored'
+    | '/api/admin/stats'
+    | '/api/admin/users'
     | '/api/alerts/poll'
+    | '/api/auth/me'
+    | '/api/auth/signup'
     | '/api/brokers/$id'
     | '/api/notifications/test-telegram'
+    | '/admin/users'
+    | '/api/admin/users/$id'
     | '/api/brokers/$id/status'
     | '/api/brokers/$id/test-connection'
+    | '/api/admin/users/$id/limits'
+    | '/api/admin/users/$id/permissions'
+    | '/api/admin/users/$id/status'
     | '/api/brokers/$id/clients/$login'
     | '/api/brokers/$id/clients/search'
     | '/api/brokers/$id/clients/$login/positions'
@@ -267,18 +477,37 @@ export interface FileRouteTypes {
     | '/monitored'
     | '/search'
     | '/settings'
+    | '/admin/approvals'
+    | '/admin/brokers'
+    | '/admin/logs'
+    | '/admin/monitored'
+    | '/admin/settings'
     | '/api/brokers'
     | '/api/monitored'
     | '/api/notifications'
     | '/api/session'
     | '/client/$login'
     | '/notifications/$id'
+    | '/admin/'
     | '/notifications/'
+    | '/admin/users/$id'
+    | '/api/admin/brokers'
+    | '/api/admin/logs'
+    | '/api/admin/monitored'
+    | '/api/admin/stats'
+    | '/api/admin/users'
     | '/api/alerts/poll'
+    | '/api/auth/me'
+    | '/api/auth/signup'
     | '/api/brokers/$id'
     | '/api/notifications/test-telegram'
+    | '/admin/users/'
+    | '/api/admin/users/$id'
     | '/api/brokers/$id/status'
     | '/api/brokers/$id/test-connection'
+    | '/api/admin/users/$id/limits'
+    | '/api/admin/users/$id/permissions'
+    | '/api/admin/users/$id/status'
     | '/api/brokers/$id/clients/$login'
     | '/api/brokers/$id/clients/search'
     | '/api/brokers/$id/clients/$login/positions'
@@ -291,14 +520,29 @@ export interface RootRouteChildren {
   MonitoredRoute: typeof MonitoredRoute
   SearchRoute: typeof SearchRoute
   SettingsRoute: typeof SettingsRoute
+  AdminApprovalsRoute: typeof AdminApprovalsRoute
+  AdminBrokersRoute: typeof AdminBrokersRoute
+  AdminLogsRoute: typeof AdminLogsRoute
+  AdminMonitoredRoute: typeof AdminMonitoredRoute
+  AdminSettingsRoute: typeof AdminSettingsRoute
   ApiBrokersRoute: typeof ApiBrokersRouteWithChildren
   ApiMonitoredRoute: typeof ApiMonitoredRoute
   ApiNotificationsRoute: typeof ApiNotificationsRouteWithChildren
   ApiSessionRoute: typeof ApiSessionRoute
   ClientLoginRoute: typeof ClientLoginRoute
   NotificationsIdRoute: typeof NotificationsIdRoute
+  AdminIndexRoute: typeof AdminIndexRoute
   NotificationsIndexRoute: typeof NotificationsIndexRoute
+  AdminUsersIdRoute: typeof AdminUsersIdRoute
+  ApiAdminBrokersRoute: typeof ApiAdminBrokersRoute
+  ApiAdminLogsRoute: typeof ApiAdminLogsRoute
+  ApiAdminMonitoredRoute: typeof ApiAdminMonitoredRoute
+  ApiAdminStatsRoute: typeof ApiAdminStatsRoute
+  ApiAdminUsersRoute: typeof ApiAdminUsersRouteWithChildren
   ApiAlertsPollRoute: typeof ApiAlertsPollRoute
+  ApiAuthMeRoute: typeof ApiAuthMeRoute
+  ApiAuthSignupRoute: typeof ApiAuthSignupRoute
+  AdminUsersIndexRoute: typeof AdminUsersIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -343,6 +587,48 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/': {
+      id: '/admin/'
+      path: '/admin'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/approvals': {
+      id: '/admin/approvals'
+      path: '/admin/approvals'
+      fullPath: '/admin/approvals'
+      preLoaderRoute: typeof AdminApprovalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/brokers': {
+      id: '/admin/brokers'
+      path: '/admin/brokers'
+      fullPath: '/admin/brokers'
+      preLoaderRoute: typeof AdminBrokersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/logs': {
+      id: '/admin/logs'
+      path: '/admin/logs'
+      fullPath: '/admin/logs'
+      preLoaderRoute: typeof AdminLogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/monitored': {
+      id: '/admin/monitored'
+      path: '/admin/monitored'
+      fullPath: '/admin/monitored'
+      preLoaderRoute: typeof AdminMonitoredRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/settings': {
+      id: '/admin/settings'
+      path: '/admin/settings'
+      fullPath: '/admin/settings'
+      preLoaderRoute: typeof AdminSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/brokers': {
@@ -394,11 +680,74 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NotificationsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/users/': {
+      id: '/admin/users/'
+      path: '/admin/users'
+      fullPath: '/admin/users/'
+      preLoaderRoute: typeof AdminUsersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/users/$id': {
+      id: '/admin/users/$id'
+      path: '/admin/users/$id'
+      fullPath: '/admin/users/$id'
+      preLoaderRoute: typeof AdminUsersIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/brokers': {
+      id: '/api/admin/brokers'
+      path: '/api/admin/brokers'
+      fullPath: '/api/admin/brokers'
+      preLoaderRoute: typeof ApiAdminBrokersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/logs': {
+      id: '/api/admin/logs'
+      path: '/api/admin/logs'
+      fullPath: '/api/admin/logs'
+      preLoaderRoute: typeof ApiAdminLogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/monitored': {
+      id: '/api/admin/monitored'
+      path: '/api/admin/monitored'
+      fullPath: '/api/admin/monitored'
+      preLoaderRoute: typeof ApiAdminMonitoredRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/stats': {
+      id: '/api/admin/stats'
+      path: '/api/admin/stats'
+      fullPath: '/api/admin/stats'
+      preLoaderRoute: typeof ApiAdminStatsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/users': {
+      id: '/api/admin/users'
+      path: '/api/admin/users'
+      fullPath: '/api/admin/users'
+      preLoaderRoute: typeof ApiAdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/alerts/poll': {
       id: '/api/alerts/poll'
       path: '/api/alerts/poll'
       fullPath: '/api/alerts/poll'
       preLoaderRoute: typeof ApiAlertsPollRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/me': {
+      id: '/api/auth/me'
+      path: '/api/auth/me'
+      fullPath: '/api/auth/me'
+      preLoaderRoute: typeof ApiAuthMeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/signup': {
+      id: '/api/auth/signup'
+      path: '/api/auth/signup'
+      fullPath: '/api/auth/signup'
+      preLoaderRoute: typeof ApiAuthSignupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/brokers/$id': {
@@ -415,6 +764,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiNotificationsTestTelegramRouteImport
       parentRoute: typeof ApiNotificationsRoute
     }
+    '/api/admin/users/$id': {
+      id: '/api/admin/users/$id'
+      path: '/$id'
+      fullPath: '/api/admin/users/$id'
+      preLoaderRoute: typeof ApiAdminUsersIdRouteImport
+      parentRoute: typeof ApiAdminUsersRoute
+    }
     '/api/brokers/$id/status': {
       id: '/api/brokers/$id/status'
       path: '/status'
@@ -428,6 +784,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/brokers/$id/test-connection'
       preLoaderRoute: typeof ApiBrokersIdTestConnectionRouteImport
       parentRoute: typeof ApiBrokersIdRoute
+    }
+    '/api/admin/users/$id/limits': {
+      id: '/api/admin/users/$id/limits'
+      path: '/limits'
+      fullPath: '/api/admin/users/$id/limits'
+      preLoaderRoute: typeof ApiAdminUsersIdLimitsRouteImport
+      parentRoute: typeof ApiAdminUsersIdRoute
+    }
+    '/api/admin/users/$id/permissions': {
+      id: '/api/admin/users/$id/permissions'
+      path: '/permissions'
+      fullPath: '/api/admin/users/$id/permissions'
+      preLoaderRoute: typeof ApiAdminUsersIdPermissionsRouteImport
+      parentRoute: typeof ApiAdminUsersIdRoute
+    }
+    '/api/admin/users/$id/status': {
+      id: '/api/admin/users/$id/status'
+      path: '/status'
+      fullPath: '/api/admin/users/$id/status'
+      preLoaderRoute: typeof ApiAdminUsersIdStatusRouteImport
+      parentRoute: typeof ApiAdminUsersIdRoute
     }
     '/api/brokers/$id/clients/$login': {
       id: '/api/brokers/$id/clients/$login'
@@ -509,6 +886,34 @@ const ApiNotificationsRouteChildren: ApiNotificationsRouteChildren = {
 const ApiNotificationsRouteWithChildren =
   ApiNotificationsRoute._addFileChildren(ApiNotificationsRouteChildren)
 
+interface ApiAdminUsersIdRouteChildren {
+  ApiAdminUsersIdLimitsRoute: typeof ApiAdminUsersIdLimitsRoute
+  ApiAdminUsersIdPermissionsRoute: typeof ApiAdminUsersIdPermissionsRoute
+  ApiAdminUsersIdStatusRoute: typeof ApiAdminUsersIdStatusRoute
+}
+
+const ApiAdminUsersIdRouteChildren: ApiAdminUsersIdRouteChildren = {
+  ApiAdminUsersIdLimitsRoute: ApiAdminUsersIdLimitsRoute,
+  ApiAdminUsersIdPermissionsRoute: ApiAdminUsersIdPermissionsRoute,
+  ApiAdminUsersIdStatusRoute: ApiAdminUsersIdStatusRoute,
+}
+
+const ApiAdminUsersIdRouteWithChildren = ApiAdminUsersIdRoute._addFileChildren(
+  ApiAdminUsersIdRouteChildren,
+)
+
+interface ApiAdminUsersRouteChildren {
+  ApiAdminUsersIdRoute: typeof ApiAdminUsersIdRouteWithChildren
+}
+
+const ApiAdminUsersRouteChildren: ApiAdminUsersRouteChildren = {
+  ApiAdminUsersIdRoute: ApiAdminUsersIdRouteWithChildren,
+}
+
+const ApiAdminUsersRouteWithChildren = ApiAdminUsersRoute._addFileChildren(
+  ApiAdminUsersRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BrokersRoute: BrokersRoute,
@@ -516,14 +921,29 @@ const rootRouteChildren: RootRouteChildren = {
   MonitoredRoute: MonitoredRoute,
   SearchRoute: SearchRoute,
   SettingsRoute: SettingsRoute,
+  AdminApprovalsRoute: AdminApprovalsRoute,
+  AdminBrokersRoute: AdminBrokersRoute,
+  AdminLogsRoute: AdminLogsRoute,
+  AdminMonitoredRoute: AdminMonitoredRoute,
+  AdminSettingsRoute: AdminSettingsRoute,
   ApiBrokersRoute: ApiBrokersRouteWithChildren,
   ApiMonitoredRoute: ApiMonitoredRoute,
   ApiNotificationsRoute: ApiNotificationsRouteWithChildren,
   ApiSessionRoute: ApiSessionRoute,
   ClientLoginRoute: ClientLoginRoute,
   NotificationsIdRoute: NotificationsIdRoute,
+  AdminIndexRoute: AdminIndexRoute,
   NotificationsIndexRoute: NotificationsIndexRoute,
+  AdminUsersIdRoute: AdminUsersIdRoute,
+  ApiAdminBrokersRoute: ApiAdminBrokersRoute,
+  ApiAdminLogsRoute: ApiAdminLogsRoute,
+  ApiAdminMonitoredRoute: ApiAdminMonitoredRoute,
+  ApiAdminStatsRoute: ApiAdminStatsRoute,
+  ApiAdminUsersRoute: ApiAdminUsersRouteWithChildren,
   ApiAlertsPollRoute: ApiAlertsPollRoute,
+  ApiAuthMeRoute: ApiAuthMeRoute,
+  ApiAuthSignupRoute: ApiAuthSignupRoute,
+  AdminUsersIndexRoute: AdminUsersIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

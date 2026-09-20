@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { addUserBroker, listUserBrokers } from "@/server/brokers";
-import { ApiError } from "@/server/errors";
-import { jsonOk } from "@/server/errors";
+import { ApiError, jsonOk } from "@/server/errors";
 import { withAuth } from "@/server/http";
+import { getUserById } from "@/server/user-store";
+import { logAudit } from "@/server/audit-store";
 
 export const Route = createFileRoute("/api/brokers")({
   server: {
@@ -11,6 +12,26 @@ export const Route = createFileRoute("/api/brokers")({
         withAuth(request, async (user) => jsonOk({ brokers: listUserBrokers(user) })),
       POST: async ({ request }) =>
         withAuth(request, async (user) => {
+          const liveUser = getUserById(user.id);
+          if (liveUser && liveUser.role === "USER") {
+            if (liveUser.permissions?.canAddBroker === false) {
+              throw new ApiError(
+                "FORBIDDEN",
+                "You do not have permission to add brokers. Please contact your administrator.",
+                403,
+              );
+            }
+            const existingBrokers = listUserBrokers(user);
+            const maxBrokers = liveUser.limits?.maxBrokers ?? 5;
+            if (existingBrokers.length >= maxBrokers) {
+              throw new ApiError(
+                "LIMIT_EXCEEDED",
+                `Broker limit reached. Your account is restricted to ${maxBrokers} broker${maxBrokers === 1 ? "" : "s"}.`,
+                403,
+              );
+            }
+          }
+
           const body = (await request.json()) as {
             name?: string;
             server?: string;
@@ -37,6 +58,17 @@ export const Route = createFileRoute("/api/brokers")({
             managerLogin: body.managerLogin,
             password: body.password,
           });
+
+          logAudit({
+            actorId: user.id,
+            actorEmail: user.email,
+            actorRole: user.role,
+            action: "BROKER_CREATE",
+            targetType: "BROKER",
+            targetId: broker.id,
+            details: { name: broker.name, server: broker.server },
+          });
+
           return jsonOk({ broker }, 201);
         }),
     },

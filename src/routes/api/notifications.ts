@@ -7,7 +7,8 @@ import {
   telegramConfigured,
 } from "@/server/telegram";
 import { ApiError, jsonOk } from "@/server/errors";
-import { withAuth } from "@/server/http";
+import { withAdminAuth, withAuth } from "@/server/http";
+import { logAudit } from "@/server/audit-store";
 
 export const Route = createFileRoute("/api/notifications")({
   server: {
@@ -18,11 +19,11 @@ export const Route = createFileRoute("/api/notifications")({
           return jsonOk({
             alerts: listAlerts(user.id),
             telegramConfigured: telegramConfigured(),
-            chatId: cfg?.chatId ?? null,
+            chatId: user.role === "ADMIN" ? (cfg?.chatId ?? null) : null,
           });
         }),
       POST: ({ request }) =>
-        withAuth(request, async (_user) => {
+        withAdminAuth(request, async (admin) => {
           if (!telegramConfigured()) {
             return jsonOk(
               { ok: false, error: "Telegram bot token or chat ID is not configured." },
@@ -33,7 +34,7 @@ export const Route = createFileRoute("/api/notifications")({
           return jsonOk(res, res.ok ? 200 : 502);
         }),
       PUT: ({ request }) =>
-        withAuth(request, async (_user) => {
+        withAdminAuth(request, async (admin) => {
           const body = (await request.json().catch(() => ({}))) as {
             botToken?: string;
             chatId?: string;
@@ -42,6 +43,14 @@ export const Route = createFileRoute("/api/notifications")({
             throw new ApiError("INVALID_INPUT", "Bot token and Chat ID are required.", 400);
           }
           saveTelegramConfig(body.botToken, body.chatId);
+          logAudit({
+            actorId: admin.id,
+            actorEmail: admin.email,
+            actorRole: admin.role,
+            action: "TELEGRAM_CONFIG_UPDATE",
+            targetType: "SYSTEM",
+            details: { chatId: body.chatId },
+          });
           const res = await sendTelegramTestMessage();
           return jsonOk({
             ok: res.ok,

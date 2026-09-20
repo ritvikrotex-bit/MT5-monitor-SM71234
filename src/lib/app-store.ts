@@ -3,9 +3,22 @@ import { type Broker, type NotificationType, type TradeNotification } from "./mt
 
 export type EventPrefs = Record<NotificationType, boolean>;
 
+export type UserProfile = {
+  id: string;
+  name: string;
+  email: string;
+  username: string;
+  role: "ADMIN" | "USER";
+  status: "PENDING" | "ACTIVE" | "SUSPENDED" | "DELETED";
+  permissions?: Record<string, boolean>;
+  limits?: { maxBrokers: number; maxMonitoredClients: number };
+};
+
 export type AppState = {
   authed: boolean;
   userName: string;
+  user: UserProfile | null;
+  role: "ADMIN" | "USER" | null;
   brokers: Broker[];
   activeBrokerId: string | null;
   monitored: string[]; // client logins
@@ -40,7 +53,9 @@ const getInitialActiveBroker = (): string | null => {
 
 let state: AppState = {
   authed: false,
-  userName: "Sankalp",
+  userName: "Operator",
+  user: null,
+  role: null,
   brokers: [],
   activeBrokerId: getInitialActiveBroker(),
   monitored: [],
@@ -67,8 +82,20 @@ export const store = {
     return () => listeners.delete(l);
   },
   get: () => state,
-  signIn: (userName?: string) => set({ authed: true, ...(userName ? { userName } : {}) }),
-  signOut: () => set({ authed: false }),
+  setUser: (user: UserProfile | null) =>
+    set({
+      user,
+      authed: Boolean(user),
+      userName: user?.name || state.userName,
+      role: user?.role || null,
+    }),
+  signIn: (userName?: string, user?: UserProfile | null) =>
+    set({
+      authed: true,
+      ...(userName ? { userName } : {}),
+      ...(user ? { user, role: user.role } : {}),
+    }),
+  signOut: () => set({ authed: false, user: null, role: null }),
   selectBroker: (id: string | null) => {
     if (typeof window !== "undefined") {
       try {
@@ -122,7 +149,7 @@ export const store = {
   setPush: (v: boolean) => set({ pushEnabled: v, pushPromptSeen: true }),
   dismissPushPrompt: () => set({ pushPromptSeen: true }),
   setTelegram: (connected: boolean) =>
-    set({ telegram: { connected, handle: connected ? "@sankalp_ops" : null } }),
+    set({ telegram: { connected, handle: connected ? "@alert_channel" : null } }),
   setEmailAlerts: (v: boolean) => set({ emailAlerts: v }),
   setEvent: (k: NotificationType, v: boolean) => set({ events: { ...state.events, [k]: v } }),
   setConnectionOk: (v: boolean) => set({ connectionOk: v }),

@@ -3,6 +3,10 @@ import "./lib/error-capture";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { startBackgroundPoller } from "./server/alerting";
+import { initDatabaseSchema } from "./server/db";
+
+// Initialize PostgreSQL schema if DATABASE_URL is configured
+void initDatabaseSchema();
 
 // Start background poller singleton for monitored MT5 client accounts
 startBackgroundPoller();

@@ -8,11 +8,11 @@ import {
   Radar,
   Activity,
   ShieldCheck,
+  Shield,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/mt5/ThemeToggle";
 import { cn } from "@/lib/utils";
-import { useApp } from "@/lib/app-store";
-import { brokerName } from "@/lib/app-store";
+import { brokerName, useApp } from "@/lib/app-store";
 
 const nav = [
   { to: "/dashboard", label: "Home", desktopLabel: "Dashboard", icon: Home },
@@ -41,6 +41,7 @@ export function AppShell({
   const unread = useUnread();
   const activeBrokerId = useApp((s) => s.activeBrokerId);
   const activeBroker = useApp((s) => s.brokers.find((b) => b.id === s.activeBrokerId));
+  const currentUser = useApp((s) => s.user);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const mobileNav = nav.filter((n) => n.to !== "/brokers");
 
@@ -83,6 +84,15 @@ export function AppShell({
           })}
         </nav>
         <div className="space-y-2 border-t border-sidebar-border p-3">
+          {currentUser?.role === "ADMIN" && (
+            <Link
+              to="/admin"
+              className="flex items-center gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+            >
+              <Shield className="size-4 shrink-0" />
+              <span className="truncate">Open Admin CRM</span>
+            </Link>
+          )}
           <div className="rounded-lg border border-border bg-secondary/50 p-3">
             <p className="label-xs">Dashboard focus</p>
             <p className="mt-0.5 truncate text-sm font-semibold">
