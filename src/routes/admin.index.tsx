@@ -74,7 +74,7 @@ function AdminDashboardPage() {
       setError(null);
       const res = await fetch("/api/admin/stats");
       if (res.status === 401 || res.status === 403) {
-        await navigate({ to: "/" });
+        await navigate({ to: res.status === 403 ? "/dashboard" : "/" });
         return;
       }
       if (!res.ok) throw new Error("Failed to load admin statistics.");

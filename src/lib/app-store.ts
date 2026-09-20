@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { type Broker, type NotificationType, type TradeNotification } from "./mt5-data";
 
 export type EventPrefs = Record<NotificationType, boolean>;
@@ -158,6 +158,27 @@ export const store = {
 // Display name for a broker id, from the live broker list (falls back to the id until loaded).
 export const brokerName = (id: string): string =>
   state.brokers.find((b) => b.id === id)?.name ?? id;
+
+// The store only lives in memory, so a browser refresh forgets who is signed in (greeting, admin link).
+// Restore it from the session cookie once per page load.
+export function useHydrateSession() {
+  const hasUser = useApp((s) => s.user !== null);
+  useEffect(() => {
+    if (hasUser) return;
+    let active = true;
+    void fetch("/api/session")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (active && data?.user) store.setUser(data.user);
+      })
+      .catch(() => {
+        // Offline or server error: keep the defaults.
+      });
+    return () => {
+      active = false;
+    };
+  }, [hasUser]);
+}
 
 export function useApp<T>(select: (s: AppState) => T): T {
   return useSyncExternalStore(
