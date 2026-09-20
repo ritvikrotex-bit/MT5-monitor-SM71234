@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { ApiError, jsonError, jsonOk } from "@/server/errors";
+import { clientIp as clientIpOf, signupLimiter } from "@/server/rate-limit";
 import { createUser } from "@/server/user-store";
 import { logAudit } from "@/server/audit-store";
 
@@ -23,10 +24,16 @@ export const Route = createFileRoute("/api/auth/signup")({
             );
           }
 
-          const clientIp =
-            request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-            request.headers.get("x-real-ip") ||
-            "local";
+          const clientIp = clientIpOf(request);
+          const wait = signupLimiter.blockedFor(clientIp);
+          if (wait > 0) {
+            throw new ApiError(
+              "TOO_MANY_ATTEMPTS",
+              `Too many sign-up attempts. Try again in ${Math.ceil(wait / 60)} minute(s).`,
+              429,
+            );
+          }
+          signupLimiter.hit(clientIp);
 
           const user = await createUser({
             name: body.name,
