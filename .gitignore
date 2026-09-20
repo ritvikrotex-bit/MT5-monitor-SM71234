@@ -44,3 +44,4 @@ __pycache__/
 # Runtime-only state is excluded: alert history + position snapshots regenerate (fresh baseline
 # on a new server avoids stale-snapshot alert floods) and change every few seconds.
 data/notifications.json
+data/audit.json

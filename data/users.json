@@ -1,14 +1,52 @@
 [
   {
-    "email": "sanket.rotex@gmail.com",
-    "password": "Sanket@555",
+    "id": "local-operator",
     "name": "Sanket",
-    "role": "admin"
+    "email": "sanket.rotex@gmail.com",
+    "username": "sanket",
+    "passwordHash": "c4d848670c029813d07f164a1cec00eb:6f7caa59fdae2c821b070bff2a580f8da5051ed148b44ce8bbe9e68b83f5ea664082019fd220d83c884a07b81bd4be8d4f4b30f60571006653e1645f4e34425d",
+    "role": "USER",
+    "status": "ACTIVE",
+    "permissions": {
+      "canLogin": true,
+      "canAddBroker": true,
+      "canConnectBroker": true,
+      "canMonitorClients": true,
+      "canUseTelegram": true,
+      "canUseEmail": true,
+      "canUsePush": true
+    },
+    "limits": {
+      "maxBrokers": 5,
+      "maxMonitoredClients": 25
+    },
+    "createdAt": "2026-09-20T22:52:47.438Z",
+    "approvedAt": "2026-09-20T22:52:47.438Z",
+    "approvedBy": "CLI"
   },
   {
-    "email": "sankalp@vayufx.com",
-    "password": "operations",
+    "id": "admin-e633ceb9",
     "name": "Sankalp",
-    "role": "admin"
+    "email": "sankalp@vayufx.com",
+    "username": "sankalp",
+    "passwordHash": "8b06206ad5288a4d783ddae61ce543b0:fcebaf58fc8085d976575a79c1bca1bb8b162f29cfd22f9b6a29413ff548c105bbbb8e347317e8c6651a4dd3702e65037c18b4471a3887b416385b9a2468e028",
+    "role": "ADMIN",
+    "status": "ACTIVE",
+    "permissions": {
+      "canLogin": true,
+      "canAddBroker": false,
+      "canConnectBroker": false,
+      "canMonitorClients": false,
+      "canUseTelegram": true,
+      "canUseEmail": true,
+      "canUsePush": true
+    },
+    "limits": {
+      "maxBrokers": 0,
+      "maxMonitoredClients": 0
+    },
+    "createdAt": "2026-09-20T22:52:47.672Z",
+    "approvedAt": "2026-09-20T22:52:47.672Z",
+    "approvedBy": "CLI"
   }
 ]

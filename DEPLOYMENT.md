@@ -13,7 +13,7 @@ Browser ─HTTPS─► Caddy :443  (already running for Trade Intel)
 No port clashes with Trade Intel. Only Caddy listens publicly; 3000 and 8765 are loopback-only.
 
 This repo is **private and is the deployment source of truth**: it contains the `.env` files and
-`data/` (operator logins, Wyn/Lotpip/Elefin brokers with Manager passwords encrypted by the committed
+`data/` (user accounts with hashed passwords, Wyn/Lotpip/Elefin brokers with Manager passwords encrypted by the committed
 `encryption.key`, Telegram bot, monitored clients). **Never make it public** — anyone who can read
 it can log in to the monitor and decrypt the broker credentials. Grant access only to people who
 should have that, and use credentials dedicated to this app (a read-only Manager account and its own
@@ -98,7 +98,48 @@ send duplicate Telegram alerts.
 powershell -ExecutionPolicy Bypass -File C:\apps\mt5-monitor\deploy\update.ps1
 ```
 (pull → `npm ci` → build → `pip install` → restart both services). There is no database migration:
-state is JSON files in `data\`.
+state is JSON files in `data\` (PostgreSQL is optional, see below). The running service keeps users in
+memory, so any change made with `npm run users` needs `nssm restart MT5MonitorWeb`.
+
+**Upgrading the earlier single-login deployment to the admin/multi-user version:** just run
+`update.ps1`. The repo's `data\users.json` now holds hashed accounts (Sanket = `USER`, id
+`local-operator`, who owns the existing brokers and monitored clients; Sankalp = `ADMIN`). Existing alert
+history and position snapshots (`data\notifications.json`, not in git) are kept, so nothing is re-baselined
+and no false alerts are sent.
+
+## Accounts, admin and approvals
+
+- **Roles.** `ADMIN` oversees the platform (users, approvals, all brokers/monitored clients, audit trail,
+  the shared Telegram bot) but does not connect brokers or monitor clients itself. `USER` accounts add their
+  own brokers and monitor their own clients; users never see each other's data.
+- **Sign in.** `https://monitor.itsrotex.com` has a *Client Login* and an *Admin Login* tab. Sign-in works with
+  email or username. New people can **sign up**, but stay `PENDING` (cannot log in) until an admin approves
+  them under *Pending Approvals*. Admins can suspend or delete users (effective immediately, even for
+  logged-in sessions), set per-user limits (default 5 brokers / 25 monitored clients) and toggle permissions.
+- **Audit trail.** Logins, failed logins, signups, approvals, limit/permission changes, broker and monitor
+  changes and Telegram changes are recorded (`data\audit.json`, latest 5,000 entries, not in git).
+- **Telegram** is one shared bot/chat for the whole system: only admins can change or test it.
+- **There is no default admin.** Accounts live in `data\users.json` as scrypt hashes. Manage them on the
+  server, then `nssm restart MT5MonitorWeb`:
+  ```powershell
+  cd C:\apps\mt5-monitor
+  npm run users -- list
+  npm run users -- add someone@example.com someone "Full Name" USER "StrongPassword"
+  npm run users -- set-password sankalp "NewStrongPassword"
+  npm run users -- set-role someone ADMIN          # or USER
+  npm run users -- set-status someone SUSPENDED    # or ACTIVE
+  ```
+  On a brand-new install with no admin, set `INITIAL_ADMIN_EMAIL` / `INITIAL_ADMIN_PASSWORD` in `.env` for the
+  first start (see `.env.example`).
+- **Change the initial passwords after the first login**: they are known to everyone who has repo access.
+
+## PostgreSQL (optional; not needed for a small team)
+
+Leave `DATABASE_URL` unset and everything runs from the JSON files in `data\`. If it is set, the app mirrors
+users, brokers, monitored clients, the audit log and the Telegram config into PostgreSQL (schema in
+`src/server/db/schema.sql`, applied automatically) and loads them from it at start-up. Alerts and position
+snapshots stay in JSON. To import existing JSON data: `npm run db:migrate`. Only enable it if you actually run
+PostgreSQL on the RDP; an unreachable `DATABASE_URL` is logged and ignored, it does not stop the app.
 
 ## Data notes
 
@@ -112,8 +153,8 @@ state is JSON files in `data\`.
   few seconds and a fresh baseline on a new server avoids stale-snapshot alerts.
 - `mt5-connector\bases\` is the MT5 Manager SDK's local cache (regenerated on connect, contains client
   rosters) and is git-ignored.
-- Operators log in via `data\users.json` (`[{ "email", "password", "name" }]`, plain text, UTF-8 —
-  a BOM is tolerated) plus the optional `MONITOR_AUTH_EMAIL/PASSWORD` in `.env`.
+- Accounts are in `data\users.json` (scrypt-hashed; change passwords with `npm run users`, never by hand).
+  `data\audit.json` is runtime-only and git-ignored.
 
 ## Networking / security
 
@@ -129,7 +170,8 @@ state is JSON files in `data\`.
 | Symptom | Check |
 |---------|-------|
 | Web service won't start | `logs\MT5MonitorWeb.err.log`; `Missing environment variable …` → fill `.env` |
-| Login rejected for everyone | `[MT5 Auth] Could not read data/users.json` in the log → fix the JSON |
+| Nobody can log in / no admin | `[MT5 Auth] No administrator account exists` in the log → `npm run users -- add … ADMIN …` |
+| A user says "awaiting approval" | Admin → *Pending Approvals* → approve |
 | `CONNECTOR_UNAVAILABLE` | MT5Manager not installed in `mt5-connector\.venv` (or 32-bit Python) |
 | `Connect failed: Network error` | Broker unreachable / RDP IP not whitelisted; transient ones clear on retry |
 | Alerts duplicated | More than one web instance running |
