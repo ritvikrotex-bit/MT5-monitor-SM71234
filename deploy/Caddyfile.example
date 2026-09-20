@@ -1,0 +1,13 @@
+# Append this block to the EXISTING Caddyfile on the RDP (the one Trade Intelligence already uses,
+# e.g. C:\apps\trade-intel\Caddyfile). Do not run a second Caddy: only one process can own :80/:443.
+#
+# DNS first: add an A record  monitor -> 13.140.188.135  (same IP as brokerintel.itsrotex.com),
+# confirm with `nslookup monitor.itsrotex.com`, then reload Caddy so it can get the certificate:
+#   caddy reload --config C:\apps\trade-intel\Caddyfile
+
+monitor.itsrotex.com {
+    encode gzip zstd
+    # The Node server does SSR + /api + the alert poller. It sets no SPA fallback, so a plain
+    # reverse_proxy is all that is needed (no `route`/`try_files` like the Trade Intel site).
+    reverse_proxy 127.0.0.1:3000
+}

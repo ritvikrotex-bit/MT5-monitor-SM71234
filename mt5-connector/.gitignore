@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+*.log
+# MT5 Manager SDK local cache (regenerated on connect; contains client roster data)
+bases/
+.pytest_cache/

@@ -1,0 +1,14 @@
+[
+  {
+    "email": "sanket.rotex@gmail.com",
+    "password": "Sanket@555",
+    "name": "Sanket",
+    "role": "admin"
+  },
+  {
+    "email": "sankalp@vayufx.com",
+    "password": "operations",
+    "name": "Sankalp",
+    "role": "admin"
+  }
+]

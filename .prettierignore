@@ -1,0 +1,12 @@
+node_modules
+dist
+.output
+.vinxi
+.wrangler
+.tanstack
+pnpm-lock.yaml
+package-lock.json
+routeTree.gen.ts
+mt5-connector
+data
+docs

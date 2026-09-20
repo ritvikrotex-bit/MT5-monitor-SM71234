@@ -1,0 +1,6 @@
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+# Windows x64 only; pulls in numpy. Verified on Python 3.12 (supports 3.10-3.13).
+MT5Manager==5.0.6204

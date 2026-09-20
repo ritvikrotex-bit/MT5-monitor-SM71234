@@ -1,0 +1,46 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies and build output (rebuilt on the server)
+node_modules
+dist
+dist-ssr
+.output
+.vinxi
+.tanstack/**
+.nitro
+*.local
+
+# Wrangler / Cloudflare (legacy Lovable deploy target)
+.wrangler/
+.dev.vars
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Python connector: virtualenv, caches, and the MT5 Manager SDK's local cache (regenerated on connect)
+mt5-connector/.venv/
+mt5-connector/bases/
+mt5-connector/logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# NOTE: .env files and data/ (brokers, users, telegram, encryption.key, monitored) ARE committed on
+# purpose: this is a private repo used as the deployment source of truth. Keep the repo private.
+# Runtime-only state is excluded: alert history + position snapshots regenerate (fresh baseline
+# on a new server avoids stale-snapshot alert floods) and change every few seconds.
+data/notifications.json
