@@ -13,7 +13,8 @@ export const Route = createFileRoute("/api/brokers")({
       POST: async ({ request }) =>
         withAuth(request, async (user) => {
           const liveUser = getUserById(user.id);
-          if (liveUser && liveUser.role === "USER") {
+          // Applies to every role: an ADMIN is an oversight account and is not meant to hold brokers.
+          if (liveUser) {
             if (liveUser.permissions?.canAddBroker === false) {
               throw new ApiError(
                 "FORBIDDEN",

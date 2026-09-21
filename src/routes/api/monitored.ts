@@ -8,7 +8,8 @@ import {
 } from "@/server/monitored";
 import { withAuth } from "@/server/http";
 import { getUserById } from "@/server/user-store";
-import { listMonitored } from "@/server/monitor-store";
+import { listAllMonitored, listMonitored } from "@/server/monitor-store";
+import { listAllBrokers } from "@/server/broker-store";
 import { logAudit } from "@/server/audit-store";
 
 export const Route = createFileRoute("/api/monitored")({
@@ -26,7 +27,8 @@ export const Route = createFileRoute("/api/monitored")({
       POST: ({ request }) =>
         withAuth(request, async (user) => {
           const liveUser = getUserById(user.id);
-          if (liveUser && liveUser.role === "USER") {
+          // Applies to every role: an ADMIN oversees the platform rather than monitoring clients itself.
+          if (liveUser) {
             if (liveUser.permissions?.canMonitorClients === false) {
               throw new ApiError(
                 "FORBIDDEN",
@@ -54,6 +56,26 @@ export const Route = createFileRoute("/api/monitored")({
             );
           }
           const login = body.login;
+
+          // One watcher per client account across the platform. Alerts go to a single shared
+          // Telegram group, so a second watcher would poll the broker twice and split the alert
+          // history between two operators while the duplicate alert is suppressed anyway.
+          const allBrokers = listAllBrokers();
+          const serverOf = (id: string) => allBrokers.find((b) => b.id === id)?.server;
+          const targetServer = serverOf(body.brokerId);
+          const clash = listAllMonitored().find(
+            (m) =>
+              m.login === login && m.userId !== user.id && serverOf(m.brokerId) === targetServer,
+          );
+          if (clash) {
+            const owner = getUserById(clash.userId);
+            throw new ApiError(
+              "ALREADY_MONITORED",
+              `Account ${login} on this server is already monitored by ${owner?.email ?? "another operator"}. Each account is watched once across the platform.`,
+              409,
+            );
+          }
+
           await monitorClient(user, body.brokerId, login);
 
           logAudit({
