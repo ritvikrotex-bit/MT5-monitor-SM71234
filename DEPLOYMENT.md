@@ -6,7 +6,7 @@ same Windows RDP that runs Trade Intelligence. Both apps share one public IP and
 ```
 Browser ─HTTPS─► Caddy :443  (already running for Trade Intel)
                    ├── brokerintel.itsrotex.com → Trade Intelligence (8000 / 8100 / 5173)
-                   └── monitor.itsrotex.com     → MT5 Monitor web  127.0.0.1:3000  (Node: SSR + /api + alert poller)
+                   └── mt5-monitor.itsrotex.com     → MT5 Monitor web  127.0.0.1:3000  (Node: SSR + /api + alert poller)
                                                         └── MT5 connector 127.0.0.1:8765 (Python/FastAPI + MT5Manager) ──► broker MT5 Manager servers
 ```
 
@@ -29,9 +29,9 @@ Nameservers for `itsrotex.com` are `ns1/ns2.dns-parking.com`. In that DNS panel 
 
 | Type | Name | Value | TTL |
 |------|------|-------|-----|
-| A | `monitor` | `13.140.188.135` (same IP as `brokerintel`) | 300 |
+| A | `mt5-monitor` | `13.140.188.135` (same IP as `brokerintel`) | 300 |
 
-Verify with `nslookup monitor.itsrotex.com` before configuring Caddy (Let's Encrypt needs it live).
+Verify with `nslookup mt5-monitor.itsrotex.com` before configuring Caddy (Let's Encrypt needs it live).
 
 ## 2. Prerequisites on the RDP
 
@@ -83,7 +83,7 @@ Caddyfile (e.g. `C:\apps\trade-intel\Caddyfile`) and run
    Live polling: `Get-Content logs\MT5MonitorConnector.out.log -Tail 20` shows
    `POST /v1/clients/positions … 200 OK` (request lines are in `out.log`, start-up lines in `err.log`);
    `503` means that broker's Manager server is refusing this IP.
-3. `https://monitor.itsrotex.com` loads with a valid certificate; log in.
+3. `https://mt5-monitor.itsrotex.com` loads with a valid certificate; log in.
 4. Brokers → **Test connection** → search a client → open positions (this is the first real MT5 test).
 5. Add a monitored client: the first poll stores a baseline (no alert); then trigger a change →
    exactly one Telegram alert.
@@ -112,7 +112,7 @@ and no false alerts are sent.
 - **Roles.** `ADMIN` oversees the platform (users, approvals, all brokers/monitored clients, audit trail,
   the shared Telegram bot) but does not connect brokers or monitor clients itself. `USER` accounts add their
   own brokers and monitor their own clients; users never see each other's data.
-- **Sign in.** `https://monitor.itsrotex.com` has a *Client Login* and an *Admin Login* tab. Sign-in works with
+- **Sign in.** `https://mt5-monitor.itsrotex.com` has a *Client Login* and an *Admin Login* tab. Sign-in works with
   email or username. New people can **sign up**, but stay `PENDING` (cannot log in) until an admin approves
   them under *Pending Approvals*. Admins can suspend or delete users (effective immediately, even for
   logged-in sessions), set per-user limits (default 5 brokers / 25 monitored clients) and toggle permissions.
