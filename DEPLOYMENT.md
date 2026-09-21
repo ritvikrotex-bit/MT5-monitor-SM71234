@@ -97,7 +97,7 @@ send duplicate Telegram alerts.
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\apps\mt5-monitor\deploy\update.ps1
 ```
-(pull → `npm ci` → build → `pip install` → restart both services). There is no database migration:
+(stop services → back up `data` → `git reset --hard origin/main` → restore `data` → `npm ci` → build → `pip install` → start services). Your server data is preserved. Add `-ResetData` once to replace `data` with the repository's seed data instead (alert history and audit trail are cleared; the old data is backed up under `logsdata-backup`). There is no database migration:
 state is JSON files in `data\` (PostgreSQL is optional, see below). The running service keeps users in
 memory, so any change made with `npm run users` needs `nssm restart MT5MonitorWeb`.
 
