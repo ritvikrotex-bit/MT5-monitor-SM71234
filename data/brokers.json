@@ -2,39 +2,39 @@
   "brokers": [
     {
       "id": "cf1f0995-df32-4634-aead-2fce4234db2c",
-      "ownerUserId": "local-operator",
+      "ownerUserId": "user-7a7b5ce3",
       "name": "Wyn",
       "server": "185.28.255.63:443",
       "managerLogin": "1001",
       "encryptedPassword": "f59afcacd731138fa052ea80:7b0d5449df7978dacf3d0229c0f2f2d1:5208d76a57a51681",
-      "status": "CONNECTED",
-      "statusMessage": "Connected to 185.28.255.63:443 as 1001",
+      "status": "DISCONNECTED",
+      "statusMessage": "Saved. Test the connection to open a Manager session.",
       "createdAt": "2026-09-08T18:00:21.843Z",
-      "updatedAt": "2026-09-08T18:05:36.121Z"
+      "updatedAt": "2026-09-21T05:11:30.336Z"
     },
     {
       "id": "c959b91d-7557-49ed-bc0b-47ff5a6fa7b5",
-      "ownerUserId": "local-operator",
+      "ownerUserId": "user-7a7b5ce3",
       "name": "Lotpip",
       "server": "185.28.255.65:443",
       "managerLogin": "1001",
       "encryptedPassword": "e34279f1ad45fb0609184920:447b4cd8ac26a96ca334f704884e9640:78664d964c0aeb77",
-      "status": "CONNECTED",
-      "statusMessage": "Connected to 185.28.255.65:443 as 1001",
+      "status": "DISCONNECTED",
+      "statusMessage": "Saved. Test the connection to open a Manager session.",
       "createdAt": "2026-09-08T18:47:04.927Z",
-      "updatedAt": "2026-09-08T18:47:06.613Z"
+      "updatedAt": "2026-09-21T05:11:30.336Z"
     },
     {
       "id": "6bbb42af-8d7a-4368-9537-aa621b9e761b",
-      "ownerUserId": "local-operator",
+      "ownerUserId": "user-7a7b5ce3",
       "name": "Elefin",
       "server": "185.28.255.34:443",
       "managerLogin": "1001",
       "encryptedPassword": "a44f5f0b69c71c558e96cdd5:04196cd143020bf233f30c726a9288a2:931df4d34fbfda95",
-      "status": "CONNECTED",
-      "statusMessage": "Connected to 185.28.255.34:443 as 1001",
+      "status": "DISCONNECTED",
+      "statusMessage": "Saved. Test the connection to open a Manager session.",
       "createdAt": "2026-09-20T19:21:48.468Z",
-      "updatedAt": "2026-09-20T19:40:31.995Z"
+      "updatedAt": "2026-09-21T05:13:49.816Z"
     }
   ]
 }

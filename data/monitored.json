@@ -1,39 +1,18 @@
 {
   "monitored": [
     {
-      "userId": "local-operator",
-      "brokerId": "cf1f0995-df32-4634-aead-2fce4234db2c",
-      "login": 910102,
-      "clientName": "Sanket Rotex Test",
-      "createdAt": "2026-09-09T07:31:07.122Z"
-    },
-    {
-      "userId": "local-operator",
-      "brokerId": "c959b91d-7557-49ed-bc0b-47ff5a6fa7b5",
-      "login": 10014,
-      "clientName": "Dhiraj Rotex Test",
-      "createdAt": "2026-09-09T07:31:26.685Z"
-    },
-    {
-      "userId": "local-operator",
-      "brokerId": "cf1f0995-df32-4634-aead-2fce4234db2c",
-      "login": 120115,
-      "clientName": "Neel ROTEX",
-      "createdAt": "2026-09-09T07:31:39.789Z"
-    },
-    {
-      "userId": "local-operator",
+      "userId": "user-7a7b5ce3",
       "brokerId": "6bbb42af-8d7a-4368-9537-aa621b9e761b",
       "login": 66314725,
       "clientName": "Abhay Patil",
-      "createdAt": "2026-09-20T19:44:01.912Z"
+      "createdAt": "2026-09-21T05:13:50.018Z"
     },
     {
-      "userId": "local-operator",
+      "userId": "user-7a7b5ce3",
       "brokerId": "6bbb42af-8d7a-4368-9537-aa621b9e761b",
       "login": 22422,
       "clientName": "ROTEX TEST",
-      "createdAt": "2026-09-20T19:45:23.451Z"
+      "createdAt": "2026-09-21T05:13:50.081Z"
     }
   ]
 }
