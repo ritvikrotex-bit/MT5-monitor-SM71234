@@ -159,6 +159,39 @@ export const store = {
 export const brokerName = (id: string): string =>
   state.brokers.find((b) => b.id === id)?.name ?? id;
 
+type ApiBroker = { id: string; name: string; server: string; status: string; managerLogin: string };
+
+export const toBroker = (b: ApiBroker): Broker => ({
+  id: b.id,
+  name: b.name,
+  server: b.server,
+  status: b.status === "CONNECTED" ? "connected" : "disconnected",
+  managerLogin: b.managerLogin,
+  lastUpdate: "now",
+});
+
+// brokerName() needs the broker list, but only the dashboard used to load it — every other page
+// (notifications, alert detail) fell back to showing the raw broker UUID. Load it once per page load.
+export function useHydrateBrokers() {
+  const hasBrokers = useApp((s) => s.brokers.length > 0);
+  useEffect(() => {
+    if (hasBrokers) return;
+    let active = true;
+    void fetch("/api/brokers")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !Array.isArray(data?.brokers)) return;
+        store.setBrokers((data.brokers as ApiBroker[]).map(toBroker));
+      })
+      .catch(() => {
+        // Offline or not signed in: names stay as ids rather than breaking the page.
+      });
+    return () => {
+      active = false;
+    };
+  }, [hasBrokers]);
+}
+
 // The store only lives in memory, so a browser refresh forgets who is signed in (greeting, admin link).
 // Restore it from the session cookie once per page load.
 export function useHydrateSession() {

@@ -3,7 +3,7 @@ import { Building2, ChevronRight, Radar, Bell, TrendingUp, X } from "lucide-reac
 import { AppShell } from "@/components/mt5/AppShell";
 import { NotificationCard } from "@/components/mt5/cards";
 import { DataFreshness, Metric, ReadOnlyBadge, StatusDot } from "@/components/mt5/primitives";
-import { store, useAppState } from "@/lib/app-store";
+import { store, toBroker, useAppState } from "@/lib/app-store";
 import { notificationMeta, toTradeNotification, type TradeNotification } from "@/lib/mt5-data";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
@@ -18,14 +18,6 @@ type LiveClient = {
   currency?: string;
   positions: unknown[];
   unavailable?: boolean;
-};
-
-type ApiBroker = {
-  id: string;
-  name: string;
-  server: string;
-  status: string;
-  managerLogin: string;
 };
 
 export const Route = createFileRoute("/dashboard")({
@@ -64,16 +56,7 @@ function Dashboard() {
       if (brokersRes.ok) {
         const data = await brokersRes.json().catch(() => ({}));
         if (Array.isArray(data.brokers)) {
-          store.setBrokers(
-            (data.brokers as ApiBroker[]).map((b) => ({
-              id: b.id,
-              name: b.name,
-              server: b.server,
-              status: b.status === "CONNECTED" ? "connected" : "disconnected",
-              managerLogin: b.managerLogin,
-              lastUpdate: "now",
-            })),
-          );
+          store.setBrokers((data.brokers as Parameters<typeof toBroker>[0][]).map(toBroker));
         }
       }
 

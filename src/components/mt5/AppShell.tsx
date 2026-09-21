@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { ThemeToggle } from "@/components/mt5/ThemeToggle";
 import { cn } from "@/lib/utils";
-import { brokerName, useApp, useHydrateSession } from "@/lib/app-store";
+import { brokerName, useApp, useHydrateBrokers, useHydrateSession } from "@/lib/app-store";
 
 const nav = [
   { to: "/dashboard", label: "Home", desktopLabel: "Dashboard", icon: Home },
@@ -39,6 +39,7 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   useHydrateSession();
+  useHydrateBrokers();
   const unread = useUnread();
   const activeBrokerId = useApp((s) => s.activeBrokerId);
   const activeBroker = useApp((s) => s.brokers.find((b) => b.id === s.activeBrokerId));
