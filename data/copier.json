@@ -1,0 +1,49 @@
+{
+  "accounts": [
+    {
+      "id": "f19e423e-586f-454d-ac9f-eb39cb04af47",
+      "ownerUserId": "user-7a7b5ce3",
+      "label": "Slave — Sanket Rotex Test",
+      "broker": "Wyncrest Capital",
+      "role": "DESTINATION",
+      "server": "WyncrestCapital-Trade",
+      "login": 910102,
+      "encryptedPassword": "6f87dcca43aed711ba08532d:0fb1727077839d78ba1f861bc1659e5e:1ba1554b3f4e972014",
+      "createdAt": "2026-09-26T20:06:50.331Z",
+      "updatedAt": "2026-09-26T20:06:50.331Z"
+    }
+  ],
+  "links": [
+    {
+      "id": "1611f63d-1165-4904-8c70-365084c5a9b3",
+      "ownerUserId": "user-7a7b5ce3",
+      "label": "TDFX 100003 → Wyncrest 910102",
+      "master": {
+        "kind": "MANAGER",
+        "brokerId": "2637a45e-beb4-4b94-8825-b3cebd7cec25",
+        "login": 100003
+      },
+      "destAccountId": "f19e423e-586f-454d-ac9f-eb39cb04af47",
+      "rules": {
+        "symbolMap": {},
+        "symbolSuffix": ".s",
+        "allowSymbols": [],
+        "denySymbols": [],
+        "lotMode": "FIXED",
+        "lotValue": 0.01,
+        "maxLot": 0.01,
+        "minVolumeAction": "SKIP",
+        "reverse": false,
+        "copySlTp": true,
+        "copyExisting": false,
+        "maxOpenPositions": 5,
+        "maxSlippagePoints": 20
+      },
+      "enabled": true,
+      "dryRun": true,
+      "maxDrawdownPct": 10,
+      "createdAt": "2026-09-26T20:06:50.331Z",
+      "updatedAt": "2026-09-26T20:23:38.617Z"
+    }
+  ]
+}

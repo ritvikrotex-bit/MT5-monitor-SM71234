@@ -3,17 +3,29 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
-  Copy,
   Pause,
   Play,
   Plus,
   RefreshCw,
+  Server,
   ShieldAlert,
   Trash2,
   X,
 } from "lucide-react";
 import { AppShell } from "@/components/mt5/AppShell";
+import {
+  Card,
+  Field,
+  Stat,
+  Tag,
+  Toggle,
+  eventTone,
+  inputClass,
+  money,
+} from "@/components/mt5/copier-parts";
 import { cn } from "@/lib/utils";
+
+type Role = "MASTER" | "DESTINATION" | "BOTH";
 
 type Account = {
   id: string;
@@ -21,14 +33,13 @@ type Account = {
   broker: string;
   server: string;
   login: number;
+  role: Role;
 };
 
-type Broker = {
-  id: string;
-  name: string;
-  server: string;
-  status: string;
-};
+type Broker = { id: string; name: string; server: string; status: string };
+
+type Master =
+  { kind: "MANAGER"; brokerId: string; login: number } | { kind: "TERMINAL"; accountId: string };
 
 type Rules = {
   lotMode: "FIXED" | "MULTIPLIER" | "BALANCE" | "EQUITY";
@@ -36,6 +47,9 @@ type Rules = {
   maxLot: number;
   minVolumeAction: "SKIP" | "MIN";
   symbolSuffix: string;
+  symbolMap: Record<string, string>;
+  allowSymbols: string[];
+  denySymbols: string[];
   reverse: boolean;
   copySlTp: boolean;
   copyExisting: boolean;
@@ -48,20 +62,21 @@ type LinkStatus = {
     copiedPositions: number;
     copiedCount: number;
     haltedReason: string | null;
+    ignored: number;
   };
   cycle: {
     error?: string | null;
     masterPositions?: number;
     masterEquity?: number;
     destEquity?: number;
+    at?: number;
   };
 };
 
 type CopyLink = {
   id: string;
   label: string;
-  masterBrokerId: string;
-  masterLogin: number;
+  master: Master;
   destAccountId: string;
   rules: Rules;
   enabled: boolean;
@@ -97,13 +112,6 @@ type Snapshot = {
 
 export const Route = createFileRoute("/copier")({ component: CopierPage });
 
-const money = (value: number, currency = "USD") =>
-  new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(value);
-
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -113,35 +121,6 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) throw new Error(data.message || "That did not work.");
   return data as T;
 }
-
-function Card({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <section className={cn("rounded-2xl border border-border bg-card p-4 sm:p-5", className)}>
-      {children}
-    </section>
-  );
-}
-
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string | undefined;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="block space-y-1">
-      <span className="text-xs font-medium text-foreground">{label}</span>
-      {children}
-      {hint && <span className="block text-[11px] break-words text-muted-foreground">{hint}</span>}
-    </label>
-  );
-}
-
-const inputClass =
-  "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary";
 
 function CopierPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -178,7 +157,7 @@ function CopierPage() {
     load().catch((e) => setError(e.message));
     const timer = setInterval(() => {
       load().catch(() => {});
-    }, 5000);
+    }, 4000);
     return () => clearInterval(timer);
   }, [load]);
 
@@ -200,6 +179,19 @@ function CopierPage() {
   const accountById = (id: string) => accounts.find((a) => a.id === id);
   const brokerById = (id: string) => brokers.find((b) => b.id === id);
 
+  const masterLabel = (master: Master) => {
+    if (master.kind === "MANAGER") {
+      return `${brokerById(master.brokerId)?.name ?? "unknown broker"} · ${master.login}`;
+    }
+    const account = accountById(master.accountId);
+    return account ? `${account.label} · ${account.login}` : "unknown account";
+  };
+
+  const live = links.filter((l) => l.enabled && !l.dryRun).length;
+  const running = links.filter((l) => l.enabled).length;
+  const halted = links.filter((l) => l.status?.state.haltedReason).length;
+  const openCopies = links.reduce((n, l) => n + (l.status?.state.copiedPositions ?? 0), 0);
+
   return (
     <AppShell
       title="Trade Copier"
@@ -215,200 +207,62 @@ function CopierPage() {
       }
     >
       <div className="space-y-4">
+        {/* ---------------- overview ---------------- */}
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <Stat
+            label="Copier service"
+            value={service.error ? "Offline" : service.running ? "Running" : "Idle"}
+            tone={service.error ? "danger" : service.running ? "ok" : "muted"}
+            {...(service.error ? { hint: "nothing is being copied" } : {})}
+          />
+          <Stat
+            label="Links"
+            value={`${running} of ${links.length}`}
+            hint={live > 0 ? `${live} placing real orders` : "none live"}
+            tone={live > 0 ? "warn" : "muted"}
+          />
+          <Stat label="Open copies" value={String(openCopies)} />
+          <Stat
+            label="Halted"
+            value={String(halted)}
+            tone={halted > 0 ? "danger" : "muted"}
+            {...(halted > 0 ? { hint: "needs arming" } : {})}
+          />
+        </div>
+
         {service.error && (
-          <div className="flex flex-wrap items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-            <ShieldAlert className="mt-0.5 size-4 shrink-0" />
-            <p className="min-w-0 flex-1 break-words">
-              The copier service is not responding, so nothing is being copied right now.{" "}
-              {service.error}
-            </p>
-          </div>
+          <Banner tone="danger">
+            The copier service is not responding, so nothing is being copied right now.{" "}
+            {service.error}
+          </Banner>
         )}
         {error && (
-          <div className="flex flex-wrap items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            <p className="min-w-0 flex-1 break-words">{error}</p>
-            <button onClick={() => setError(null)} aria-label="Dismiss">
-              <X className="size-4" />
-            </button>
-          </div>
+          <Banner tone="danger" onDismiss={() => setError(null)}>
+            {error}
+          </Banner>
         )}
-        {notice && (
-          <div className="rounded-xl border border-primary/30 bg-primary/10 p-3 text-xs break-words text-primary">
-            {notice}
-          </div>
-        )}
-
-        {/* ---------------- accounts ---------------- */}
-        <Card>
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold">Destination accounts</h2>
-              <p className="text-xs break-words text-muted-foreground">
-                The accounts trades are copied onto. Each needs its MT5 trading password; an
-                investor password cannot place orders. Masters are read through your broker's
-                Manager connection, so they are not set up here.
-              </p>
-            </div>
-            <button
-              onClick={() => setAddingAccount((v) => !v)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary-foreground"
-            >
-              <Plus className="size-3.5" /> Add account
-            </button>
-          </div>
-
-          {addingAccount && (
-            <AccountForm
-              onCancel={() => setAddingAccount(false)}
-              onSave={(body) =>
-                run(
-                  "add-account",
-                  async () => {
-                    await api("/api/copier/accounts", {
-                      method: "POST",
-                      body: JSON.stringify(body),
-                    });
-                    setAddingAccount(false);
-                  },
-                  "Account saved.",
-                )
-              }
-              busy={busy === "add-account"}
-            />
-          )}
-
-          <div className="mt-3 space-y-2">
-            {accounts.length === 0 && !addingAccount && (
-              <p className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
-                No destination accounts yet. Add the account you want trades copied onto.
-              </p>
-            )}
-            {accounts.map((account) => {
-              const result = probe[account.id];
-              return (
-                <div
-                  key={account.id}
-                  className="rounded-xl border border-border bg-secondary/40 p-3"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-                    <div className="min-w-0 flex-1 basis-48">
-                      <p className="text-sm font-semibold break-words">{account.label}</p>
-                      <p className="text-xs break-all text-muted-foreground">
-                        {account.broker ? `${account.broker} · ` : ""}
-                        {account.server} · {account.login}
-                      </p>
-                    </div>
-                    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-                      <button
-                        onClick={() =>
-                          run(`probe-${account.id}`, async () => {
-                            try {
-                              const snap = await api<Snapshot>(
-                                `/api/copier/accounts/${account.id}/probe`,
-                                { method: "POST" },
-                              );
-                              setProbe((p) => ({ ...p, [account.id]: snap }));
-                            } catch (e) {
-                              setProbe((p) => ({
-                                ...p,
-                                [account.id]: e instanceof Error ? e.message : "Could not connect.",
-                              }));
-                              throw e;
-                            }
-                          })
-                        }
-                        disabled={busy === `probe-${account.id}`}
-                        className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium whitespace-nowrap hover:bg-secondary disabled:opacity-50"
-                      >
-                        {busy === `probe-${account.id}` ? "Checking..." : "Test login"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (!confirm(`Remove ${account.label}?`)) return;
-                          void run(
-                            `del-${account.id}`,
-                            () => api(`/api/copier/accounts/${account.id}`, { method: "DELETE" }),
-                            "Account removed.",
-                          );
-                        }}
-                        className="grid size-7 place-items-center rounded-lg border border-destructive/40 text-destructive hover:bg-destructive/10"
-                        aria-label={`Remove ${account.label}`}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {typeof result === "string" && (
-                    <p className="mt-2 rounded-lg bg-destructive/10 p-2 text-[11px] break-words text-destructive">
-                      {result}
-                    </p>
-                  )}
-                  {result && typeof result !== "string" && (
-                    <div className="mt-2 space-y-1 rounded-lg bg-background/60 p-2 text-[11px]">
-                      <p className="break-words">
-                        <span className="font-semibold">{result.account.name}</span> ·{" "}
-                        {result.account.company}
-                      </p>
-                      <p className="text-muted-foreground">
-                        Balance {money(result.account.balance, result.account.currency)} · equity{" "}
-                        {money(result.account.equity, result.account.currency)} · leverage 1:
-                        {result.account.leverage} · {result.positions.length} open
-                      </p>
-                      <div className="flex flex-wrap gap-1.5 pt-0.5">
-                        <Tag
-                          tone={result.account.tradeMode === 2 ? "danger" : "ok"}
-                          text={
-                            result.account.tradeMode === 2
-                              ? "REAL MONEY"
-                              : result.account.tradeMode === 1
-                                ? "contest"
-                                : "demo"
-                          }
-                        />
-                        <Tag
-                          tone={result.account.hedging ? "ok" : "warn"}
-                          text={result.account.hedging ? "hedging" : "netting"}
-                        />
-                        <Tag
-                          tone={result.account.tradeAllowed ? "ok" : "warn"}
-                          text={result.account.tradeAllowed ? "can trade" : "read only"}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </Card>
+        {notice && <Banner tone="ok">{notice}</Banner>}
 
         {/* ---------------- links ---------------- */}
-        <Card>
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold">Copy links</h2>
-              <p className="text-xs break-words text-muted-foreground">
-                Each link copies one master account onto one destination. New links start stopped
-                and in dry run.
-              </p>
-            </div>
+        <Card
+          title="Copy links"
+          description="Each link copies one master onto one destination. Add as many as you need in either direction: several masters onto one account, or one master fanned out across several."
+          action={
             <button
               onClick={() => setAddingLink((v) => !v)}
-              disabled={accounts.length < 1 || brokers.length < 1}
+              disabled={accounts.length < 1}
               className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary-foreground disabled:opacity-50"
             >
               <Plus className="size-3.5" /> Add link
             </button>
-          </div>
-
+          }
+        >
           {addingLink && (
             <LinkForm
               accounts={accounts}
               brokers={brokers}
-              onCancel={() => setAddingLink(false)}
               busy={busy === "add-link"}
+              onCancel={() => setAddingLink(false)}
               onSave={(body) =>
                 run(
                   "add-link",
@@ -424,15 +278,17 @@ function CopierPage() {
 
           <div className="mt-3 space-y-3">
             {links.length === 0 && !addingLink && (
-              <p className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
-                No links yet.
-              </p>
+              <Empty>
+                {accounts.length === 0
+                  ? "Add a destination account below, then create your first link."
+                  : "No links yet."}
+              </Empty>
             )}
             {links.map((link) => (
               <LinkRow
                 key={link.id}
                 link={link}
-                masterBroker={brokerById(link.masterBrokerId)}
+                masterLabel={masterLabel(link.master)}
                 dest={accountById(link.destAccountId)}
                 busy={busy}
                 onAction={run}
@@ -441,14 +297,85 @@ function CopierPage() {
           </div>
         </Card>
 
+        {/* ---------------- accounts ---------------- */}
+        <Card
+          title="MT5 accounts"
+          description="Destinations are traded on and need the account's trading password. You only need an account here to read a master by logging in to it; a master read through a broker's Manager connection needs nothing."
+          action={
+            <button
+              onClick={() => setAddingAccount((v) => !v)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary-foreground"
+            >
+              <Plus className="size-3.5" /> Add account
+            </button>
+          }
+        >
+          {addingAccount && (
+            <AccountForm
+              busy={busy === "add-account"}
+              onCancel={() => setAddingAccount(false)}
+              onSave={(body) =>
+                run(
+                  "add-account",
+                  async () => {
+                    await api("/api/copier/accounts", {
+                      method: "POST",
+                      body: JSON.stringify(body),
+                    });
+                    setAddingAccount(false);
+                  },
+                  "Account saved.",
+                )
+              }
+            />
+          )}
+
+          <div className="mt-3 space-y-2">
+            {accounts.length === 0 && !addingAccount && (
+              <Empty>No accounts yet. Add the account you want trades copied onto.</Empty>
+            )}
+            {accounts.map((account) => (
+              <AccountRow
+                key={account.id}
+                account={account}
+                result={probe[account.id]}
+                busy={busy}
+                onProbe={() =>
+                  run(`probe-${account.id}`, async () => {
+                    try {
+                      const snap = await api<Snapshot>(`/api/copier/accounts/${account.id}/probe`, {
+                        method: "POST",
+                      });
+                      setProbe((p) => ({ ...p, [account.id]: snap }));
+                    } catch (e) {
+                      setProbe((p) => ({
+                        ...p,
+                        [account.id]: e instanceof Error ? e.message : "Could not connect.",
+                      }));
+                      throw e;
+                    }
+                  })
+                }
+                onDelete={() => {
+                  if (!confirm(`Remove ${account.label}?`)) return;
+                  void run(
+                    `del-${account.id}`,
+                    () => api(`/api/copier/accounts/${account.id}`, { method: "DELETE" }),
+                    "Account removed.",
+                  );
+                }}
+              />
+            ))}
+          </div>
+        </Card>
+
         {/* ---------------- activity ---------------- */}
-        <Card>
-          <h2 className="text-sm font-semibold">Recent activity</h2>
+        <Card title="Recent activity">
           <div className="mt-2 space-y-1.5">
             {events.length === 0 && (
               <p className="text-xs text-muted-foreground">
-                Nothing yet. Decisions appear here as soon as a link is running, including in dry
-                run.
+                Nothing yet. Every decision shows up here as soon as a link is running, including in
+                dry run.
               </p>
             )}
             {events.map((event, index) => (
@@ -471,44 +398,163 @@ function CopierPage() {
   );
 }
 
-function eventTone(kind: string): "ok" | "warn" | "danger" | "muted" {
-  if (kind === "opened" || kind === "open") return "ok";
-  if (kind === "error" || kind === "halted") return "danger";
-  if (kind === "skipped" || kind === "duplicate") return "warn";
-  return "muted";
-}
-
-function Tag({ tone, text }: { tone: "ok" | "warn" | "danger" | "muted"; text: string }) {
+function Banner({
+  tone,
+  children,
+  onDismiss,
+}: {
+  tone: "danger" | "ok";
+  children: React.ReactNode;
+  onDismiss?: () => void;
+}) {
   return (
-    <span
+    <div
       className={cn(
-        "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
-        tone === "ok" && "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-        tone === "warn" && "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-        tone === "danger" && "bg-destructive/15 text-destructive",
-        tone === "muted" && "bg-secondary text-muted-foreground",
+        "flex flex-wrap items-start gap-2 rounded-xl border p-3 text-xs",
+        tone === "danger"
+          ? "border-destructive/40 bg-destructive/10 text-destructive"
+          : "border-primary/30 bg-primary/10 text-primary",
       )}
     >
-      {text}
-    </span>
+      {tone === "danger" && <AlertTriangle className="mt-0.5 size-4 shrink-0" />}
+      <p className="min-w-0 flex-1 break-words">{children}</p>
+      {onDismiss && (
+        <button onClick={onDismiss} aria-label="Dismiss">
+          <X className="size-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+      {children}
+    </p>
+  );
+}
+
+function AccountRow({
+  account,
+  result,
+  busy,
+  onProbe,
+  onDelete,
+}: {
+  account: Account;
+  result: Snapshot | string | undefined;
+  busy: string | null;
+  onProbe: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-secondary/40 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+        <div className="min-w-0 flex-1 basis-48">
+          <p className="text-sm font-semibold break-words">{account.label}</p>
+          <p className="text-xs break-all text-muted-foreground">
+            {account.broker ? `${account.broker} · ` : ""}
+            {account.server} · {account.login}
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            <Tag
+              tone={account.role === "MASTER" ? "info" : account.role === "BOTH" ? "muted" : "warn"}
+              text={
+                account.role === "MASTER"
+                  ? "master only · never traded on"
+                  : account.role === "BOTH"
+                    ? "master or destination"
+                    : "destination"
+              }
+            />
+          </div>
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <button
+            onClick={onProbe}
+            disabled={busy === `probe-${account.id}`}
+            className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium whitespace-nowrap hover:bg-secondary disabled:opacity-50"
+          >
+            {busy === `probe-${account.id}` ? "Checking..." : "Test login"}
+          </button>
+          <button
+            onClick={onDelete}
+            className="grid size-7 place-items-center rounded-lg border border-destructive/40 text-destructive hover:bg-destructive/10"
+            aria-label={`Remove ${account.label}`}
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {typeof result === "string" && (
+        <p className="mt-2 rounded-lg bg-destructive/10 p-2 text-[11px] break-words text-destructive">
+          {result}
+        </p>
+      )}
+      {result && typeof result !== "string" && (
+        <div className="mt-2 space-y-1 rounded-lg bg-background/60 p-2 text-[11px]">
+          <p className="break-words">
+            <span className="font-semibold">{result.account.name}</span> · {result.account.company}
+          </p>
+          <p className="text-muted-foreground">
+            Balance {money(result.account.balance, result.account.currency)} · equity{" "}
+            {money(result.account.equity, result.account.currency)} · leverage 1:
+            {result.account.leverage} · {result.positions.length} open
+          </p>
+          <div className="flex flex-wrap gap-1.5 pt-0.5">
+            <Tag
+              tone={result.account.tradeMode === 2 ? "danger" : "ok"}
+              text={
+                result.account.tradeMode === 2
+                  ? "REAL MONEY"
+                  : result.account.tradeMode === 1
+                    ? "contest"
+                    : "demo"
+              }
+            />
+            <Tag
+              tone={result.account.hedging ? "ok" : "warn"}
+              text={result.account.hedging ? "hedging" : "netting"}
+            />
+            <Tag
+              tone={result.account.tradeAllowed ? "ok" : "warn"}
+              text={result.account.tradeAllowed ? "can trade" : "read only"}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-background/60 px-2 py-1.5">
+      <p className="text-muted-foreground">{label}</p>
+      <p className="num font-semibold break-words">{value}</p>
+    </div>
   );
 }
 
 function LinkRow({
   link,
-  masterBroker,
+  masterLabel,
   dest,
   busy,
   onAction,
 }: {
   link: CopyLink;
-  masterBroker: Broker | undefined;
+  masterLabel: string;
   dest: Account | undefined;
   busy: string | null;
   onAction: (key: string, fn: () => Promise<unknown>, done?: string) => Promise<void>;
 }) {
   const halted = link.status?.state.haltedReason ?? null;
   const cycleError = link.status?.cycle.error ?? null;
+  const rules = link.rules;
+  const mappings = Object.keys(rules.symbolMap ?? {}).length;
   const patch = (body: Record<string, unknown>, done?: string) =>
     onAction(
       `link-${link.id}`,
@@ -516,33 +562,44 @@ function LinkRow({
       done,
     );
 
+  const sizing =
+    rules.lotMode === "FIXED"
+      ? `fixed ${rules.lotValue} lots`
+      : rules.lotMode === "MULTIPLIER"
+        ? `master lot x${rules.lotValue}`
+        : `auto-scale by ${rules.lotMode.toLowerCase()}${
+            rules.lotValue !== 1 ? ` x${rules.lotValue}` : ""
+          }`;
+
   return (
     <div className="rounded-xl border border-border bg-secondary/40 p-3">
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
         <div className="min-w-0 flex-1 basis-56">
           <p className="text-sm font-semibold break-words">{link.label}</p>
           <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs break-words text-muted-foreground">
-            <span>
-              {masterBroker ? `${masterBroker.name} ${link.masterLogin}` : "unknown broker"}
-            </span>
+            <Server className="size-3 shrink-0" />
+            <span>{masterLabel}</span>
+            <Tag
+              tone="muted"
+              text={link.master.kind === "MANAGER" ? "via Manager" : "via MT5 login"}
+            />
             <ArrowRight className="size-3 shrink-0" />
-            <span>{dest ? `${dest.label} (${dest.login})` : "unknown destination"}</span>
+            <span>{dest ? `${dest.label} · ${dest.login}` : "unknown destination"}</span>
           </p>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             <Tag tone={link.enabled ? "ok" : "muted"} text={link.enabled ? "running" : "stopped"} />
             <Tag tone={link.dryRun ? "warn" : "danger"} text={link.dryRun ? "dry run" : "LIVE"} />
-            <Tag
-              tone="muted"
-              text={
-                link.rules.lotMode === "FIXED"
-                  ? `${link.rules.lotValue} lots fixed`
-                  : link.rules.lotMode === "MULTIPLIER"
-                    ? `x${link.rules.lotValue}`
-                    : `by ${link.rules.lotMode.toLowerCase()} x${link.rules.lotValue}`
-              }
-            />
-            {link.rules.maxLot > 0 && <Tag tone="muted" text={`max ${link.rules.maxLot}`} />}
-            {link.rules.reverse && <Tag tone="warn" text="reversed" />}
+            <Tag tone="muted" text={sizing} />
+            {rules.maxLot > 0 && <Tag tone="muted" text={`max ${rules.maxLot} lots`} />}
+            {rules.symbolSuffix && <Tag tone="muted" text={`suffix ${rules.symbolSuffix}`} />}
+            {mappings > 0 && (
+              <Tag tone="muted" text={`${mappings} symbol mapping${mappings === 1 ? "" : "s"}`} />
+            )}
+            {rules.reverse && <Tag tone="warn" text="reversed" />}
+            {!rules.copySlTp && <Tag tone="muted" text="no SL/TP" />}
+            {rules.maxOpenPositions > 0 && (
+              <Tag tone="muted" text={`max ${rules.maxOpenPositions} open`} />
+            )}
             {link.maxDrawdownPct > 0 && (
               <Tag tone="muted" text={`stop at -${link.maxDrawdownPct}%`} />
             )}
@@ -584,7 +641,7 @@ function LinkRow({
           </button>
           <button
             onClick={() => {
-              if (!confirm(`Close every position this link owns on the destination?`)) return;
+              if (!confirm("Close every position this link owns on the destination?")) return;
               void onAction(
                 `link-${link.id}`,
                 () => api(`/api/copier/links/${link.id}/flatten`, { method: "POST" }),
@@ -640,13 +697,47 @@ function LinkRow({
         </p>
       )}
       {link.status && (
-        <p className="mt-2 text-[11px] break-words text-muted-foreground">
-          {link.status.state.copiedPositions} open{" "}
-          {link.status.state.copiedPositions === 1 ? "copy" : "copies"} ·{" "}
-          {link.status.state.copiedCount} copied in total · {link.status.cycle.masterPositions ?? 0}{" "}
-          open on the master
-        </p>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+          <MiniStat label="Open copies" value={String(link.status.state.copiedPositions)} />
+          <MiniStat label="Copied in total" value={String(link.status.state.copiedCount)} />
+          <MiniStat label="Master open" value={String(link.status.cycle.masterPositions ?? "—")} />
+          <MiniStat
+            label="Destination equity"
+            value={
+              link.status.cycle.destEquity !== undefined ? money(link.status.cycle.destEquity) : "—"
+            }
+          />
+        </div>
       )}
+    </div>
+  );
+}
+
+function FormButtons({
+  busy,
+  onCancel,
+  submitLabel,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  submitLabel: string;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      <button
+        type="submit"
+        disabled={busy}
+        className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary-foreground disabled:opacity-50"
+      >
+        {busy ? "Saving..." : submitLabel}
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium whitespace-nowrap"
+      >
+        Cancel
+      </button>
     </div>
   );
 }
@@ -666,6 +757,7 @@ function AccountForm({
     server: "",
     login: "",
     password: "",
+    role: "DESTINATION" as Role,
   });
   const set =
     (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -686,7 +778,7 @@ function AccountForm({
             className={inputClass}
             value={form.label}
             onChange={set("label")}
-            placeholder="Master — TD Capital"
+            placeholder="Slave — Wyncrest"
           />
         </Field>
         <Field label="Broker" hint="Optional, for your own reference.">
@@ -694,7 +786,7 @@ function AccountForm({
             className={inputClass}
             value={form.broker}
             onChange={set("broker")}
-            placeholder="TD Capital"
+            placeholder="Wyncrest Capital"
           />
         </Field>
         <Field
@@ -721,7 +813,7 @@ function AccountForm({
         </Field>
         <Field
           label="Password"
-          hint="A destination needs the trading password. An investor password can only read."
+          hint="A destination needs the trading password. A master read by login only needs its investor password."
         >
           <input
             required
@@ -731,23 +823,15 @@ function AccountForm({
             onChange={set("password")}
           />
         </Field>
+        <Field label="Use as" hint="A master-only account is kept out of every destination picker.">
+          <select className={inputClass} value={form.role} onChange={set("role")}>
+            <option value="DESTINATION">Destination — trades are placed on it</option>
+            <option value="MASTER">Master only — never traded on</option>
+            <option value="BOTH">Either</option>
+          </select>
+        </Field>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary-foreground disabled:opacity-50"
-        >
-          {busy ? "Saving..." : "Save account"}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium whitespace-nowrap"
-        >
-          Cancel
-        </button>
-      </div>
+      <FormButtons busy={busy} onCancel={onCancel} submitLabel="Save account" />
     </form>
   );
 }
@@ -765,38 +849,73 @@ function LinkForm({
   onCancel: () => void;
   busy: boolean;
 }) {
+  const destinations = accounts.filter((a) => a.role !== "MASTER");
+  const terminalMasters = accounts.filter((a) => a.role !== "DESTINATION");
   const [form, setForm] = useState({
     label: "",
+    masterKind: "MANAGER" as Master["kind"],
     masterBrokerId: brokers[0]?.id ?? "",
     masterLogin: "",
-    destAccountId: accounts[0]?.id ?? "",
+    masterAccountId: terminalMasters[0]?.id ?? "",
+    destAccountId: destinations[0]?.id ?? "",
     lotMode: "BALANCE" as Rules["lotMode"],
     lotValue: "1",
     maxLot: "0",
     minVolumeAction: "SKIP" as Rules["minVolumeAction"],
     symbolSuffix: "",
+    symbolMap: "",
+    allowSymbols: "",
+    denySymbols: "",
     maxOpenPositions: "0",
+    maxSlippagePoints: "20",
     maxDrawdownPct: "0",
     reverse: false,
     copySlTp: true,
     copyExisting: false,
   });
+  const [mapError, setMapError] = useState<string | null>(null);
   const set =
-    (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-      setForm((f) => ({
-        ...f,
-        [key]:
-          e.target.type === "checkbox" ? (e.target as HTMLInputElement).checked : e.target.value,
-      }));
+    (key: keyof typeof form) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+      setForm((f) => ({ ...f, [key]: e.target.value }));
+  const toggle = (key: keyof typeof form) => (value: boolean) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  const parseList = (raw: string) =>
+    raw
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  /** "XAUUSD.c = XAUUSD.s" per line, or comma separated. */
+  const parseMap = (raw: string): Record<string, string> => {
+    const out: Record<string, string> = {};
+    for (const line of parseList(raw)) {
+      const [from, to] = line.split(/[=>:]+/).map((s) => s.trim());
+      if (!from || !to) throw new Error(`"${line}" should look like XAUUSD.c = XAUUSD.s`);
+      out[from] = to;
+    }
+    return out;
+  };
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
+        let symbolMap: Record<string, string>;
+        try {
+          symbolMap = parseMap(form.symbolMap);
+          setMapError(null);
+        } catch (err) {
+          setMapError(err instanceof Error ? err.message : "Check the symbol mappings.");
+          return;
+        }
         onSave({
           label: form.label,
-          masterBrokerId: form.masterBrokerId,
-          masterLogin: Number(form.masterLogin),
+          master:
+            form.masterKind === "MANAGER"
+              ? { kind: "MANAGER", brokerId: form.masterBrokerId, login: Number(form.masterLogin) }
+              : { kind: "TERMINAL", accountId: form.masterAccountId },
           destAccountId: form.destAccountId,
           maxDrawdownPct: Number(form.maxDrawdownPct),
           rules: {
@@ -805,57 +924,99 @@ function LinkForm({
             maxLot: Number(form.maxLot),
             minVolumeAction: form.minVolumeAction,
             symbolSuffix: form.symbolSuffix,
+            symbolMap,
+            allowSymbols: parseList(form.allowSymbols),
+            denySymbols: parseList(form.denySymbols),
             maxOpenPositions: Number(form.maxOpenPositions),
+            maxSlippagePoints: Number(form.maxSlippagePoints),
             reverse: form.reverse,
             copySlTp: form.copySlTp,
             copyExisting: form.copyExisting,
           },
         });
       }}
-      className="mt-3 space-y-3 rounded-xl border border-primary/30 bg-primary/5 p-3 sm:p-4"
+      className="mt-3 space-y-4 rounded-xl border border-primary/30 bg-primary/5 p-3 sm:p-4"
     >
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Label">
-          <input
-            required
-            className={inputClass}
-            value={form.label}
-            onChange={set("label")}
-            placeholder="TD Capital to Wyncrest"
-          />
-        </Field>
+      <Field label="Label">
+        <input
+          required
+          className={inputClass}
+          value={form.label}
+          onChange={set("label")}
+          placeholder="TDFX 100003 to Wyncrest 910102"
+        />
+      </Field>
+
+      {/* ---- master */}
+      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
+        <legend className="px-1 text-xs font-semibold">
+          Master — where trades are copied from
+        </legend>
         <Field
-          label="Master's broker"
-          hint="The broker whose Manager connection can see the master account."
+          label="Read the master"
+          hint="Through a broker's Manager connection is the normal choice: no password for that account, and nothing can trade on it."
         >
-          <select
-            required
-            className={inputClass}
-            value={form.masterBrokerId}
-            onChange={set("masterBrokerId")}
-          >
-            <option value="">Choose a broker</option>
-            {brokers.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name} ({b.server})
-              </option>
-            ))}
+          <select className={inputClass} value={form.masterKind} onChange={set("masterKind")}>
+            <option value="MANAGER">From the Manager connection (recommended)</option>
+            <option value="TERMINAL">By logging in to the account on its MT5 server</option>
           </select>
         </Field>
-        <Field
-          label="Master's MT5 login"
-          hint="Read only, over the Manager API. No password for this account is needed."
-        >
-          <input
-            required
-            type="number"
-            className={inputClass}
-            value={form.masterLogin}
-            onChange={set("masterLogin")}
-            placeholder="100003"
-          />
-        </Field>
-        <Field label="Copy onto (destination)">
+        {form.masterKind === "MANAGER" ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Broker" hint="Whose Manager connection can see the master.">
+              <select
+                required
+                className={inputClass}
+                value={form.masterBrokerId}
+                onChange={set("masterBrokerId")}
+              >
+                <option value="">Choose a broker</option>
+                {brokers.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.server})
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Master's MT5 login" hint="Read only. No password for it is needed.">
+              <input
+                required
+                type="number"
+                className={inputClass}
+                value={form.masterLogin}
+                onChange={set("masterLogin")}
+                placeholder="100003"
+              />
+            </Field>
+          </div>
+        ) : (
+          <Field
+            label="Master account"
+            hint="An account added below. Its investor password is enough."
+          >
+            <select
+              required
+              className={inputClass}
+              value={form.masterAccountId}
+              onChange={set("masterAccountId")}
+            >
+              <option value="">Choose an account</option>
+              {terminalMasters.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label} ({a.login})
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+      </fieldset>
+
+      {/* ---- destination */}
+      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
+        <legend className="px-1 text-xs font-semibold">
+          Destination — where trades are copied to
+        </legend>
+        <Field label="Account" hint="Needs its MT5 trading password, on a hedging account.">
           <select
             required
             className={inputClass}
@@ -863,142 +1024,179 @@ function LinkForm({
             onChange={set("destAccountId")}
           >
             <option value="">Choose an account</option>
-            {accounts.map((a) => (
+            {destinations.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.label} ({a.login})
+                {a.label} ({a.server} · {a.login})
               </option>
             ))}
           </select>
         </Field>
-        <Field
-          label="Lot sizing"
-          hint="Balance scales the master's lot by the ratio of the two balances."
-        >
-          <select className={inputClass} value={form.lotMode} onChange={set("lotMode")}>
-            <option value="BALANCE">Scale by balance</option>
-            <option value="EQUITY">Scale by equity</option>
-            <option value="MULTIPLIER">Multiply the master's lot</option>
-            <option value="FIXED">Fixed lot</option>
-          </select>
-        </Field>
-        <Field
-          label={form.lotMode === "FIXED" ? "Lots per trade" : "Factor"}
-          hint={form.lotMode === "FIXED" ? undefined : "Applied on top of the scaling above."}
-        >
-          <input
-            required
-            type="number"
-            step="0.01"
-            min="0.01"
-            className={inputClass}
-            value={form.lotValue}
-            onChange={set("lotValue")}
-          />
-        </Field>
-        <Field label="Maximum lots per order" hint="0 means no cap. Worth setting.">
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            className={inputClass}
-            value={form.maxLot}
-            onChange={set("maxLot")}
-          />
-        </Field>
-        <Field
-          label="Destination symbol suffix"
-          hint="Only needed when one base name matches several symbols, e.g. .s"
-        >
-          <input
-            className={inputClass}
-            value={form.symbolSuffix}
-            onChange={set("symbolSuffix")}
-            placeholder=".s"
-          />
-        </Field>
-        <Field label="If the lot is under the minimum">
-          <select
-            className={inputClass}
-            value={form.minVolumeAction}
-            onChange={set("minVolumeAction")}
+      </fieldset>
+
+      {/* ---- sizing */}
+      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
+        <legend className="px-1 text-xs font-semibold">Lot sizing</legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field
+            label="Mode"
+            hint="Auto-scaling multiplies the master's lot by the ratio between the two accounts."
           >
-            <option value="SKIP">Skip the trade</option>
-            <option value="MIN">Use the smallest allowed lot</option>
-          </select>
-        </Field>
-        <Field label="Maximum open copies" hint="0 means no cap.">
-          <input
-            type="number"
-            min="0"
-            className={inputClass}
-            value={form.maxOpenPositions}
-            onChange={set("maxOpenPositions")}
-          />
-        </Field>
-        <Field
-          label="Stop if equity drops by (%)"
-          hint="0 is off. When it fires, the link closes its copies and stays stopped."
-        >
-          <input
-            type="number"
-            step="0.5"
-            min="0"
-            className={inputClass}
-            value={form.maxDrawdownPct}
-            onChange={set("maxDrawdownPct")}
-          />
-        </Field>
-      </div>
-
-      <div className="space-y-2">
-        {(
-          [
-            ["copySlTp", "Copy stop loss and take profit", "Mirrors the master's levels."],
-            ["reverse", "Reverse the direction", "Buys become sells. Stops are not copied."],
-            [
-              "copyExisting",
-              "Copy trades already open on the master",
-              "Off by default: it would enter at prices the master never paid.",
-            ],
-          ] as const
-        ).map(([key, label, hint]) => (
-          <label key={key} className="flex items-start gap-2.5 text-xs">
+            <select className={inputClass} value={form.lotMode} onChange={set("lotMode")}>
+              <option value="BALANCE">Auto-scale by balance</option>
+              <option value="EQUITY">Auto-scale by equity</option>
+              <option value="MULTIPLIER">Multiply the master's lot</option>
+              <option value="FIXED">Fixed lot</option>
+            </select>
+          </Field>
+          <Field
+            label={form.lotMode === "FIXED" ? "Lots per trade" : "Factor"}
+            {...(form.lotMode === "FIXED" ? {} : { hint: "Applied on top of the scaling above." })}
+          >
             <input
-              type="checkbox"
-              checked={form[key] as boolean}
-              onChange={set(key)}
-              className="mt-0.5 size-4 shrink-0"
+              required
+              type="number"
+              step="0.01"
+              min="0.01"
+              className={inputClass}
+              value={form.lotValue}
+              onChange={set("lotValue")}
             />
-            <span className="min-w-0">
-              <span className="font-medium">{label}</span>
-              <span className="block break-words text-[11px] text-muted-foreground">{hint}</span>
-            </span>
-          </label>
-        ))}
-      </div>
+          </Field>
+          <Field label="Maximum lots per order" hint="0 means no cap. Worth setting.">
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              className={inputClass}
+              value={form.maxLot}
+              onChange={set("maxLot")}
+            />
+          </Field>
+          <Field label="If the lot comes out under the symbol minimum">
+            <select
+              className={inputClass}
+              value={form.minVolumeAction}
+              onChange={set("minVolumeAction")}
+            >
+              <option value="SKIP">Skip the trade</option>
+              <option value="MIN">Use the smallest allowed lot</option>
+            </select>
+          </Field>
+        </div>
+        <p className="text-[11px] break-words text-muted-foreground">
+          Lots always round down to the symbol's step, so rounding never increases your exposure.
+        </p>
+      </fieldset>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-primary-foreground disabled:opacity-50"
-        >
-          {busy ? "Saving..." : "Create link"}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium whitespace-nowrap"
-        >
-          Cancel
-        </button>
-      </div>
-      <p className="flex flex-wrap items-start gap-1.5 text-[11px] text-muted-foreground">
-        <Copy className="mt-0.5 size-3 shrink-0" />
-        <span className="min-w-0 flex-1 break-words">
-          The link is created stopped and in dry run. Start it, watch the activity log agree with
-          what the master is doing, then switch it live.
-        </span>
+      {/* ---- symbols */}
+      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
+        <legend className="px-1 text-xs font-semibold">Symbol translation</legend>
+        <p className="text-[11px] break-words text-muted-foreground">
+          Names are matched by their base, so <code>XAUUSD.c</code> finds <code>XAUUSD.s</code> on
+          its own. You only need these when a base name matches more than one symbol, or when the
+          two brokers name an instrument differently. A symbol that cannot be matched is skipped and
+          reported, never guessed at.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Destination suffix" hint="Breaks a tie, e.g. .s">
+            <input
+              className={inputClass}
+              value={form.symbolSuffix}
+              onChange={set("symbolSuffix")}
+              placeholder=".s"
+            />
+          </Field>
+          <Field label="Explicit mappings" hint="One per line: XAUUSD.c = XAUUSD.s">
+            <textarea
+              rows={3}
+              className={inputClass}
+              value={form.symbolMap}
+              onChange={set("symbolMap")}
+              placeholder="XAUUSD.c = XAUUSD.s"
+            />
+          </Field>
+          <Field label="Only copy these" hint="Base names, comma or line separated. Empty = all.">
+            <input
+              className={inputClass}
+              value={form.allowSymbols}
+              onChange={set("allowSymbols")}
+              placeholder="XAUUSD, EURUSD"
+            />
+          </Field>
+          <Field label="Never copy these" hint="Base names, comma or line separated.">
+            <input
+              className={inputClass}
+              value={form.denySymbols}
+              onChange={set("denySymbols")}
+              placeholder="BTCUSD"
+            />
+          </Field>
+        </div>
+        {mapError && <p className="text-[11px] break-words text-destructive">{mapError}</p>}
+      </fieldset>
+
+      {/* ---- limits and behaviour */}
+      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
+        <legend className="px-1 text-xs font-semibold">Limits and behaviour</legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Maximum open copies" hint="0 means no cap.">
+            <input
+              type="number"
+              min="0"
+              className={inputClass}
+              value={form.maxOpenPositions}
+              onChange={set("maxOpenPositions")}
+            />
+          </Field>
+          <Field label="Slippage allowance (points)">
+            <input
+              type="number"
+              min="0"
+              className={inputClass}
+              value={form.maxSlippagePoints}
+              onChange={set("maxSlippagePoints")}
+            />
+          </Field>
+          <Field
+            label="Stop if destination equity drops by (%)"
+            hint="0 is off. When it fires, the link closes its copies and stays stopped until you arm it."
+          >
+            <input
+              type="number"
+              step="0.5"
+              min="0"
+              className={inputClass}
+              value={form.maxDrawdownPct}
+              onChange={set("maxDrawdownPct")}
+            />
+          </Field>
+        </div>
+        <div className="space-y-2">
+          <Toggle
+            checked={form.copySlTp}
+            onChange={toggle("copySlTp")}
+            label="Copy stop loss and take profit"
+            hint="Mirrors the master's levels, and follows them when they move."
+          />
+          <Toggle
+            checked={form.reverse}
+            onChange={toggle("reverse")}
+            label="Reverse the direction"
+            hint="Buys become sells. The master's stops are not copied, since they would sit on the wrong side."
+          />
+          <Toggle
+            checked={form.copyExisting}
+            onChange={toggle("copyExisting")}
+            label="Copy trades already open on the master"
+            hint="Off by default: it would enter at prices the master never paid."
+          />
+        </div>
+      </fieldset>
+
+      <FormButtons busy={busy} onCancel={onCancel} submitLabel="Create link" />
+      <p className="text-[11px] break-words text-muted-foreground">
+        The link is created stopped and in dry run. Start it, watch the activity log agree with what
+        the master is doing, then switch it live.
       </p>
     </form>
   );

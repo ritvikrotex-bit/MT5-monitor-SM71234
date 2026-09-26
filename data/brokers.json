@@ -11,6 +11,18 @@
       "statusMessage": "Saved. Test the connection to open a Manager session.",
       "createdAt": "2026-09-20T19:21:48.468Z",
       "updatedAt": "2026-09-21T05:13:49.816Z"
+    },
+    {
+      "id": "2637a45e-beb4-4b94-8825-b3cebd7cec25",
+      "ownerUserId": "user-7a7b5ce3",
+      "name": "TDFX",
+      "server": "31.14.254.192:443",
+      "managerLogin": "1021",
+      "encryptedPassword": "4594a8541732c83ca55792f1:5d441b3c7398c512d7135c89aeaddaed:8b83e03d02c28473",
+      "status": "DISCONNECTED",
+      "statusMessage": "Saved. Test the connection to open a Manager session.",
+      "createdAt": "2026-09-26T20:06:50.331Z",
+      "updatedAt": "2026-09-26T20:06:50.331Z"
     }
   ]
 }

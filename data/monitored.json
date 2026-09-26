@@ -13,6 +13,13 @@
       "login": 22422,
       "clientName": "ROTEX TEST",
       "createdAt": "2026-09-21T05:23:25.164Z"
+    },
+    {
+      "id": "a9cf3fe4-a91e-40f6-9e6d-fa498dcc03b6",
+      "ownerUserId": "user-7a7b5ce3",
+      "brokerId": "2637a45e-beb4-4b94-8825-b3cebd7cec25",
+      "login": 100003,
+      "addedAt": "2026-09-26T20:06:50.331Z"
     }
   ]
 }

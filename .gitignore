@@ -50,3 +50,6 @@ data/audit.json
 mt5-copier/state/
 mt5-copier/.venv/
 mt5-copier/.env
+
+# Portable MT5 terminals must never live inside the repository
+mt5-terminals/

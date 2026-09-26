@@ -2,7 +2,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { logAudit } from "@/server/audit-store";
 import { requireCopierPermission } from "@/server/copier-access";
 import { pushCopierConfigQuietly } from "@/server/copier-client";
-import { createCopierLink, listCopierLinks, type CopierRules } from "@/server/copier-store";
+import {
+  createCopierLink,
+  listCopierLinks,
+  type CopierMaster,
+  type CopierRules,
+} from "@/server/copier-store";
 import { ApiError, jsonOk } from "@/server/errors";
 import { withAuth } from "@/server/http";
 
@@ -20,30 +25,21 @@ export const Route = createFileRoute("/api/copier/links")({
           requireCopierPermission(user);
           const body = (await request.json()) as {
             label?: string;
-            masterBrokerId?: string;
-            masterLogin?: number | string;
+            master?: CopierMaster;
             destAccountId?: string;
             rules?: Partial<CopierRules>;
             maxDrawdownPct?: number;
           };
-          const masterLogin = Number(body.masterLogin);
-          if (
-            !body.label ||
-            !body.masterBrokerId ||
-            !body.destAccountId ||
-            !Number.isInteger(masterLogin) ||
-            masterLogin <= 0
-          ) {
+          if (!body.label || !body.master || !body.destAccountId) {
             throw new ApiError(
               "INVALID_LINK",
-              "A label, the master's broker and MT5 login, and a destination account are all required.",
+              "A label, a master and a destination account are all required.",
               400,
             );
           }
           const link = createCopierLink(user.id, {
             label: body.label,
-            masterBrokerId: body.masterBrokerId,
-            masterLogin,
+            master: body.master,
             destAccountId: body.destAccountId,
             ...(body.rules ? { rules: body.rules } : {}),
             ...(body.maxDrawdownPct !== undefined ? { maxDrawdownPct: body.maxDrawdownPct } : {}),
@@ -58,8 +54,7 @@ export const Route = createFileRoute("/api/copier/links")({
             targetId: link.id,
             details: {
               label: link.label,
-              masterBroker: link.masterBrokerId,
-              masterLogin: link.masterLogin,
+              master: link.master,
               destination: link.destAccountId,
               lotMode: link.rules.lotMode,
               lotValue: link.rules.lotValue,

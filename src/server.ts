@@ -3,6 +3,7 @@ import "./lib/error-capture";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { startBackgroundPoller } from "./server/alerting";
+import { startCopierConfigSync } from "./server/copier-sync";
 import { initDatabaseSchema } from "./server/db";
 
 // Initialize PostgreSQL schema if DATABASE_URL is configured
@@ -10,6 +11,9 @@ void initDatabaseSchema();
 
 // Start background poller singleton for monitored MT5 client accounts
 startBackgroundPoller();
+
+// Hand the trade copier its configuration; it holds none of its own.
+startCopierConfigSync();
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;

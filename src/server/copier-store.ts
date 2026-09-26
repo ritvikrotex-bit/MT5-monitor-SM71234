@@ -21,15 +21,27 @@ import { dataFile } from "./paths";
  *   passwords.
  */
 
+/**
+ * What a stored MT5 account may be used for.
+ *
+ * MASTER accounts are only ever read, so marking one keeps it out of every
+ * destination picker and stops a slip of the mouse from trading on it.
+ */
+export type CopierAccountRole = "MASTER" | "DESTINATION" | "BOTH";
+
 export type StoredCopierAccount = {
   id: string;
   ownerUserId: string;
   label: string;
   broker: string;
+  role: CopierAccountRole;
   /** Server name as MT5 knows it, or "host:port" for a server not in its list. */
   server: string;
   login: number;
-  /** The account's *trading* password. An investor password cannot place orders. */
+  /**
+   * A destination needs the account's *trading* password. A terminal-read
+   * master only needs its investor password, which cannot place orders.
+   */
   encryptedPassword: string;
   createdAt: string;
   updatedAt: string;
@@ -53,14 +65,23 @@ export type CopierRules = {
   maxSlippagePoints: number;
 };
 
+/**
+ * Where a link reads its master from.
+ *
+ * MANAGER is the normal choice: the account is watched through a broker's
+ * Manager connection, needs no password of its own, and cannot be traded on.
+ * TERMINAL logs a terminal in to the master account itself, which is only
+ * needed when we hold its (investor) password but have no manager access to
+ * that server.
+ */
+export type CopierMaster =
+  { kind: "MANAGER"; brokerId: string; login: number } | { kind: "TERMINAL"; accountId: string };
+
 export type StoredCopierLink = {
   id: string;
   ownerUserId: string;
   label: string;
-  /** The broker whose Manager connection can see the master account. */
-  masterBrokerId: string;
-  /** The master's MT5 client login on that broker. */
-  masterLogin: number;
+  master: CopierMaster;
   destAccountId: string;
   rules: CopierRules;
   enabled: boolean;
@@ -91,6 +112,11 @@ export const DEFAULT_RULES: CopierRules = {
 
 const LOT_MODES = ["FIXED", "MULTIPLIER", "BALANCE", "EQUITY"] as const;
 const MIN_VOLUME_ACTIONS = ["SKIP", "MIN"] as const;
+const ROLES = ["MASTER", "DESTINATION", "BOTH"] as const;
+
+function normaliseRole(role: unknown): CopierAccountRole {
+  return ROLES.includes(role as CopierAccountRole) ? (role as CopierAccountRole) : "DESTINATION";
+}
 
 function filePath(): string {
   return dataFile("copier.json");
@@ -148,7 +174,14 @@ export function getCopierAccount(userId: string, id: string): StoredCopierAccoun
 
 export async function createCopierAccount(
   userId: string,
-  input: { label: string; broker: string; server: string; login: number; password: string },
+  input: {
+    label: string;
+    broker: string;
+    server: string;
+    login: number;
+    password: string;
+    role?: string;
+  },
 ): Promise<PublicCopierAccount> {
   const all = readAll();
   const server = input.server.trim();
@@ -164,6 +197,7 @@ export async function createCopierAccount(
     ownerUserId: userId,
     label: input.label.trim(),
     broker: input.broker.trim(),
+    role: normaliseRole(input.role),
     server,
     login,
     encryptedPassword: await encryptSecret(input.password),
@@ -178,7 +212,14 @@ export async function createCopierAccount(
 export async function updateCopierAccount(
   userId: string,
   id: string,
-  patch: { label?: string; broker?: string; server?: string; login?: number; password?: string },
+  patch: {
+    label?: string;
+    broker?: string;
+    server?: string;
+    login?: number;
+    password?: string;
+    role?: string;
+  },
 ): Promise<PublicCopierAccount> {
   const all = readAll();
   const idx = all.accounts.findIndex((a) => a.id === id);
@@ -190,6 +231,7 @@ export async function updateCopierAccount(
     ...current,
     label: patch.label?.trim() ?? current.label,
     broker: patch.broker?.trim() ?? current.broker,
+    role: patch.role !== undefined ? normaliseRole(patch.role) : current.role,
     server: patch.server?.trim() ?? current.server,
     login: patch.login !== undefined ? Number(patch.login) : current.login,
     updatedAt: new Date().toISOString(),
@@ -206,11 +248,13 @@ export function deleteCopierAccount(userId: string, id: string): void {
   if (!row || row.ownerUserId !== userId) {
     throw new ApiError("UNAUTHORIZED_ACCOUNT", "You do not have access to this account.", 403);
   }
-  const usedBy = all.links.filter((l) => l.destAccountId === id);
+  const usedBy = all.links.filter(
+    (l) => l.destAccountId === id || (l.master.kind === "TERMINAL" && l.master.accountId === id),
+  );
   if (usedBy.length > 0) {
     throw new ApiError(
       "ACCOUNT_IN_USE",
-      `This account is still the destination of ${usedBy.length} copy link${
+      `This account is still used by ${usedBy.length} copy link${
         usedBy.length === 1 ? "" : "s"
       }. Remove the link first.`,
       409,
@@ -267,25 +311,28 @@ export function createCopierLink(
   userId: string,
   input: {
     label: string;
-    masterBrokerId: string;
-    masterLogin: number;
+    master: CopierMaster;
     destAccountId: string;
     rules?: Partial<CopierRules>;
     maxDrawdownPct?: number;
   },
 ): StoredCopierLink {
-  // Both sides must belong to this user; these throw if not.
-  getBroker(userId, input.masterBrokerId);
-  getCopierAccount(userId, input.destAccountId);
+  const master = validateMaster(userId, input.master);
+  const destination = getCopierAccount(userId, input.destAccountId);
+  if (destination.role === "MASTER") {
+    throw new ApiError(
+      "INVALID_LINK",
+      `${destination.label} is marked master-only, so trades cannot be placed on it.`,
+      400,
+    );
+  }
+  if (master.kind === "TERMINAL" && master.accountId === input.destAccountId) {
+    throw new ApiError("INVALID_LINK", "An account cannot copy onto itself.", 400);
+  }
 
   const all = readAll();
   if (
-    all.links.some(
-      (l) =>
-        l.masterBrokerId === input.masterBrokerId &&
-        l.masterLogin === input.masterLogin &&
-        l.destAccountId === input.destAccountId,
-    )
+    all.links.some((l) => sameMaster(l.master, master) && l.destAccountId === input.destAccountId)
   ) {
     throw new ApiError("DUPLICATE_LINK", "That master is already copied onto that account.", 409);
   }
@@ -294,8 +341,7 @@ export function createCopierLink(
     id: crypto.randomUUID(),
     ownerUserId: userId,
     label: input.label.trim(),
-    masterBrokerId: input.masterBrokerId,
-    masterLogin: Number(input.masterLogin),
+    master,
     destAccountId: input.destAccountId,
     rules: normaliseRules(input.rules),
     // Never auto-arm: a new link starts stopped and in dry run so its rules can
@@ -354,6 +400,37 @@ export function deleteCopierLink(userId: string, id: string): void {
   writeAll({ ...all, links: all.links.filter((l) => l.id !== id) });
 }
 
+function sameMaster(a: CopierMaster, b: CopierMaster): boolean {
+  if (a.kind !== b.kind) return false;
+  return a.kind === "MANAGER" && b.kind === "MANAGER"
+    ? a.brokerId === b.brokerId && a.login === b.login
+    : (a as { accountId: string }).accountId === (b as { accountId: string }).accountId;
+}
+
+/** Check a master belongs to this user and is usable, and return it normalised. */
+function validateMaster(userId: string, master: CopierMaster | undefined): CopierMaster {
+  if (!master || (master.kind !== "MANAGER" && master.kind !== "TERMINAL")) {
+    throw new ApiError("INVALID_LINK", "Choose where the master is read from.", 400);
+  }
+  if (master.kind === "MANAGER") {
+    const login = Number(master.login);
+    if (!Number.isInteger(login) || login <= 0) {
+      throw new ApiError("INVALID_LINK", "The master's MT5 login must be a number.", 400);
+    }
+    getBroker(userId, master.brokerId); // throws when it is not theirs
+    return { kind: "MANAGER", brokerId: master.brokerId, login };
+  }
+  const account = getCopierAccount(userId, master.accountId);
+  if (account.role === "DESTINATION") {
+    throw new ApiError(
+      "INVALID_LINK",
+      `${account.label} is marked destination-only, so it cannot be a master.`,
+      400,
+    );
+  }
+  return { kind: "TERMINAL", accountId: master.accountId };
+}
+
 /** Brokers this user could pick a master account from. */
 export function listMasterBrokers(userId: string) {
   return listBrokers(userId).map((b) => ({
@@ -384,33 +461,62 @@ export type CopierServiceConfig = {
  */
 export async function buildCopierServiceConfig(): Promise<CopierServiceConfig> {
   const { accounts, links } = readAll();
+  const byId = new Map(accounts.map((a) => [a.id, a]));
   const usable: StoredCopierLink[] = [];
   const masters: Record<string, unknown>[] = [];
+  /** Accounts that need a terminal: every destination, plus terminal-read masters. */
+  const needed = new Set<string>();
 
   for (const link of links) {
-    let broker;
-    try {
-      broker = getBroker(link.ownerUserId, link.masterBrokerId);
-    } catch {
+    if (!byId.has(link.destAccountId)) {
       console.error(
-        `[copier] link ${link.id} (${link.label}) points at broker ${link.masterBrokerId}, which no longer exists; skipping it`,
+        `[copier] link ${link.id} (${link.label}) has no destination account ${link.destAccountId}; skipping it`,
       );
       continue;
     }
+
+    let master: Record<string, unknown>;
+    if (link.master.kind === "MANAGER") {
+      let broker;
+      try {
+        broker = getBroker(link.ownerUserId, link.master.brokerId);
+      } catch {
+        console.error(
+          `[copier] link ${link.id} (${link.label}) points at broker ${link.master.brokerId}, which no longer exists; skipping it`,
+        );
+        continue;
+      }
+      master = {
+        kind: "MANAGER",
+        label: `${broker.name} ${link.master.login}`,
+        server: broker.server,
+        managerLogin: Number(broker.managerLogin),
+        managerPassword: await decryptBrokerPassword(broker),
+        account: link.master.login,
+      };
+    } else {
+      const source = byId.get(link.master.accountId);
+      if (!source) {
+        console.error(
+          `[copier] link ${link.id} (${link.label}) reads its master from account ${link.master.accountId}, which no longer exists; skipping it`,
+        );
+        continue;
+      }
+      master = {
+        kind: "TERMINAL",
+        label: `${source.label} (${source.login})`,
+        accountId: source.id,
+      };
+      needed.add(source.id);
+    }
+
     usable.push(link);
-    masters.push({
-      kind: "MANAGER",
-      label: `${broker.name} ${link.masterLogin}`,
-      server: broker.server,
-      managerLogin: Number(broker.managerLogin),
-      managerPassword: await decryptBrokerPassword(broker),
-      account: link.masterLogin,
-    });
+    masters.push(master);
+    needed.add(link.destAccountId);
   }
 
-  // Only ship credentials for destinations a usable link actually needs, so an
+  // Only ship credentials for accounts a usable link actually needs, so an
   // unused account never causes a terminal to start or a login to be attempted.
-  const needed = new Set(usable.map((l) => l.destAccountId));
   const payload: CopierServiceConfig["accounts"] = [];
   for (const account of accounts) {
     if (!needed.has(account.id)) continue;

@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +24,22 @@ class Settings(BaseSettings):
 
     terminals_root: Path = Path(r"C:\mt5-terminals")
     """Where each account's portable MT5 terminal is provisioned."""
+
+    @field_validator("terminals_root")
+    @classmethod
+    def _terminals_root_must_be_absolute(cls, value: Path) -> Path:
+        # Each terminal is ~230 MB. A relative path — including a Windows
+        # drive-relative one like "C:mt5-terminals", which is what a lost
+        # backslash in .env produces — would quietly scatter them into
+        # whatever directory the service happened to start from. Fail loudly
+        # instead of filling a disk somewhere nobody is looking.
+        if not value.is_absolute():
+            raise ValueError(
+                f"TERMINALS_ROOT must be an absolute path, got {str(value)!r}. "
+                r"On Windows use a full path such as C:\mt5-terminals "
+                "(note the backslash after the drive letter)."
+            )
+        return value
 
     state_dir: Path = Path("state")
     """Ticket maps and per-link runtime state."""

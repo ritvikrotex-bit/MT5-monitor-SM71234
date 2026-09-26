@@ -14,7 +14,8 @@
       "canMonitorClients": false,
       "canUseTelegram": true,
       "canUseEmail": true,
-      "canUsePush": true
+      "canUsePush": true,
+      "canUseCopier": false
     },
     "limits": {
       "maxBrokers": 0,
@@ -40,7 +41,8 @@
       "canMonitorClients": true,
       "canUseTelegram": true,
       "canUseEmail": true,
-      "canUsePush": true
+      "canUsePush": true,
+      "canUseCopier": true
     },
     "limits": {
       "maxBrokers": 5,
@@ -49,6 +51,6 @@
     "createdAt": "2026-09-21T05:11:30.336Z",
     "approvedAt": "2026-09-21T05:11:30.336Z",
     "approvedBy": "SYSTEM",
-    "lastLoginAt": "2026-09-21T05:32:52.600Z"
+    "lastLoginAt": "2026-09-26T20:26:25.299Z"
   }
 ]

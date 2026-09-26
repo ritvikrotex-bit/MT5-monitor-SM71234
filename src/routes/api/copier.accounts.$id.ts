@@ -18,6 +18,7 @@ export const Route = createFileRoute("/api/copier/accounts/$id")({
             server?: string;
             login?: number;
             password?: string;
+            role?: string;
           };
           const account = await updateCopierAccount(user.id, params.id, body);
 

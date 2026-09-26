@@ -24,6 +24,7 @@ export const Route = createFileRoute("/api/copier/accounts")({
             server?: string;
             login?: number | string;
             password?: string;
+            role?: string;
           };
           const login = Number(body.login);
           if (
@@ -45,6 +46,7 @@ export const Route = createFileRoute("/api/copier/accounts")({
             server: body.server,
             login,
             password: body.password,
+            ...(body.role ? { role: body.role } : {}),
           });
 
           logAudit({
@@ -55,7 +57,12 @@ export const Route = createFileRoute("/api/copier/accounts")({
             targetType: "COPIER_ACCOUNT",
             targetId: account.id,
             // The password is deliberately absent: the audit log is plain text.
-            details: { label: account.label, server: account.server, login: account.login },
+            details: {
+              label: account.label,
+              server: account.server,
+              login: account.login,
+              role: account.role,
+            },
           });
 
           const warning = await pushCopierConfigQuietly();
