@@ -45,3 +45,8 @@ __pycache__/
 # on a new server avoids stale-snapshot alert floods) and change every few seconds.
 data/notifications.json
 data/audit.json
+
+# Trade copier runtime state (ticket maps) and its virtualenv
+mt5-copier/state/
+mt5-copier/.venv/
+mt5-copier/.env
