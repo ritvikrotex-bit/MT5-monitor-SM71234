@@ -430,8 +430,8 @@ function ChannelRow({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-secondary/40 p-3">
-      <div className="flex min-w-0 items-center gap-3">
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5 rounded-xl border border-border bg-secondary/40 p-3">
+      <div className="flex min-w-0 flex-1 basis-44 items-center gap-3">
         <span
           className={cn(
             "grid size-9 shrink-0 place-items-center rounded-lg transition-colors",
@@ -442,10 +442,10 @@ function ChannelRow({
         </span>
         <div className="min-w-0">
           <p className="text-sm font-medium">{label}</p>
-          <p className="truncate text-xs text-muted-foreground">{description}</p>
+          <p className="text-xs break-words text-muted-foreground">{description}</p>
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex w-full flex-wrap items-center gap-2 pl-12 sm:w-auto sm:justify-end sm:pl-0 [&_button]:whitespace-nowrap">
         {action}
         {onToggle ? (
           <Switch checked={active} onChange={onToggle} />
