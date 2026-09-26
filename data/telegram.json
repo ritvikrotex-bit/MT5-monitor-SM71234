@@ -1,4 +1,9 @@
 {
-  "botToken": "8923712180:AAG6rd2xa4pa1F9N6qwkbV0ExKpws-58mqY",
-  "chatId": "-5477637689"
+  "users": {
+    "user-7a7b5ce3": {
+      "botTokenEnc": "5bdbb8575b977b7b705e49b7:2bd23abafcff81d4117c25605a5b3016:f459348ae22d890499210e2f1f5af15403e7256a3b1ce472ea13dafba820e740b4f949f87b48660e39b5b532853b",
+      "chatId": "-5477637689",
+      "updatedAt": "2026-09-26T05:16:08.516Z"
+    }
+  }
 }

@@ -36,7 +36,7 @@ Scripts: `npm run typecheck`, `npm run lint`, `npm run format`. Connector tests:
 
 Multi-user with roles: `USER` (own brokers and monitored clients) and `ADMIN` (oversight console at `/admin`:
 user directory, sign-up approvals, per-user limits and permissions, broker/monitored oversight, audit trail,
-shared Telegram settings). Sign-up requires admin approval. Accounts are stored hashed in `data/users.json`;
+per-user Telegram status). Sign-up requires admin approval. Accounts are stored hashed in `data/users.json`;
 manage them with `npm run users -- list | add | set-password | set-role | set-status`. There is no default
 admin account. Details in [DEPLOYMENT.md](DEPLOYMENT.md).
 
@@ -49,8 +49,9 @@ server starts with a fresh alert history.
 
 ## Telegram alerts
 
-An administrator configures the bot token and chat id in the web UI (Settings) or via `TELEGRAM_BOT_TOKEN` /
-`TELEGRAM_CHAT_ID`. The first poll of each monitored account stores a baseline and sends nothing;
+Telegram is **per user**: each user pastes their own bot token and chat id in the web UI (Settings → Telegram),
+and alerts for that user's monitored clients go only to that chat (token stored encrypted, verified with a test
+message before saving). The first poll of each monitored account stores a baseline and sends nothing;
 later polls detect new/closed positions, volume changes and SL/TP changes. A failed or unreachable
 MT5 read is never treated as "position closed". The poller runs inside the web process every
 `MONITOR_POLL_INTERVAL_SECONDS` (default 5).

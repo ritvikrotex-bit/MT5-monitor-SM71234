@@ -14,7 +14,7 @@ No port clashes with Trade Intel. Only Caddy listens publicly; 3000 and 8765 are
 
 This repo is **private and is the deployment source of truth**: it contains the `.env` files and
 `data/` (user accounts with hashed passwords, Wyn/Lotpip/Elefin brokers with Manager passwords encrypted by the committed
-`encryption.key`, Telegram bot, monitored clients). **Never make it public** — anyone who can read
+`encryption.key`, each user's Telegram bot token (encrypted), monitored clients). **Never make it public** — anyone who can read
 it can log in to the monitor and decrypt the broker credentials. Grant access only to people who
 should have that, and use credentials dedicated to this app (a read-only Manager account and its own
 Telegram bot). Alert history is not committed, so the RDP starts with a fresh alert history and
@@ -97,20 +97,22 @@ send duplicate Telegram alerts.
 ```powershell
 powershell -ExecutionPolicy Bypass -File C:\apps\mt5-monitor\deploy\update.ps1
 ```
-(stop services → back up `data` → `git reset --hard origin/main` → restore `data` → `npm ci` → build → `pip install` → start services). Your server data is preserved. Add `-ResetData` once to replace `data` with the repository's seed data instead (alert history and audit trail are cleared; the old data is backed up under `logsdata-backup`). There is no database migration:
+(stop services → back up `data\` → `git reset --hard origin/main` → restore `data\` → `npm ci` → build → `pip install` → start services). Your server data is preserved. Add `-ResetData` once to replace `data\` with the repository's seed data instead (alert history and audit trail are cleared; the old data is backed up under `logs\data-backup\<timestamp>`). There is no database migration:
 state is JSON files in `data\` (PostgreSQL is optional, see below). The running service keeps users in
 memory, so any change made with `npm run users` needs `nssm restart MT5MonitorWeb`.
 
-**Upgrading the earlier single-login deployment to the admin/multi-user version:** just run
-`update.ps1`. The repo's `data\users.json` now holds hashed accounts (Sanket = `USER`, id
-`local-operator`, who owns the existing brokers and monitored clients; Sankalp = `ADMIN`). Existing alert
-history and position snapshots (`data\notifications.json`, not in git) are kept, so nothing is re-baselined
-and no false alerts are sent.
+**Upgrading from an earlier build:** run `update.ps1` (default mode keeps the server's own `data\`). Accounts,
+brokers and the watchlist are untouched. If `data\telegram.json` is still in the old *shared* format
+(`{ botToken, chatId }`), it is converted automatically on the first start: the bot is assigned to the one user
+who has monitored clients and its token is encrypted (the log shows `Migrated the old shared Telegram bot to
+user …`). If several users have monitored clients it cannot tell whose bot it is, so each user simply sets their
+own under *Settings → Telegram*. Existing alert history and position snapshots (`data\notifications.json`, not in
+git) are kept, so nothing is re-baselined and no false alerts are sent.
 
 ## Accounts, admin and approvals
 
 - **Roles.** `ADMIN` oversees the platform (users, approvals, all brokers/monitored clients, audit trail,
-  the shared Telegram bot) but does not connect brokers or monitor clients itself. `USER` accounts add their
+  each user's Telegram status) but does not connect brokers or monitor clients itself. `USER` accounts add their
   own brokers and monitor their own clients; users never see each other's data.
 - **Sign in.** `https://mt5-monitor.itsrotex.com` has a *Client Login* and an *Admin Login* tab. Sign-in works with
   email or username. New people can **sign up**, but stay `PENDING` (cannot log in) until an admin approves
@@ -118,7 +120,13 @@ and no false alerts are sent.
   logged-in sessions), set per-user limits (default 5 brokers / 25 monitored clients) and toggle permissions.
 - **Audit trail.** Logins, failed logins, signups, approvals, limit/permission changes, broker and monitor
   changes and Telegram changes are recorded (`data\audit.json`, latest 5,000 entries, not in git).
-- **Telegram** is one shared bot/chat for the whole system: only admins can change or test it.
+- **Telegram is per user.** Each user opens *Settings → Telegram* and pastes **their own** bot token (from
+  @BotFather) and chat ID. The details are verified with a real test message before they are saved, and the
+  token is stored encrypted in `data\telegram.json` (never returned by the API). Alerts for a user's monitored
+  clients go **only** to that user's chat: there is no shared bot and no fallback, so one user's trades are
+  never sent to another user's group. A user with no Telegram set up still gets in-app alerts. An admin can
+  switch Telegram off for an account (permission *Telegram*). Clients: each account/server is watched by one
+  user at a time.
 - **There is no default admin.** Accounts live in `data\users.json` as scrypt hashes. Manage them on the
   server, then `nssm restart MT5MonitorWeb`:
   ```powershell
@@ -136,7 +144,7 @@ and no false alerts are sent.
 ## PostgreSQL (optional; not needed for a small team)
 
 Leave `DATABASE_URL` unset and everything runs from the JSON files in `data\`. If it is set, the app mirrors
-users, brokers, monitored clients, the audit log and the Telegram config into PostgreSQL (schema in
+users, brokers, monitored clients and the audit log into PostgreSQL (schema in
 `src/server/db/schema.sql`, applied automatically) and loads them from it at start-up. Alerts and position
 snapshots stay in JSON. To import existing JSON data: `npm run db:migrate`. Only enable it if you actually run
 PostgreSQL on the RDP; an unreachable `DATABASE_URL` is logged and ignored, it does not stop the app.
