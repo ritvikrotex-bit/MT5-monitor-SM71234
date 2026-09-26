@@ -30,6 +30,9 @@ $backup = Join-Path $AppDir ("logs\data-backup\" + (Get-Date -Format "yyyyMMdd-H
 
 Write-Host "==> stopping services (so nothing writes to data\ mid-update)"
 nssm stop MT5MonitorWeb | Out-Null
+# Stop the copier before the connector: it reads masters through it, and a
+# stopped connector would otherwise log a burst of failed cycles.
+nssm stop MT5MonitorCopier 2>$null | Out-Null
 nssm stop MT5MonitorConnector | Out-Null
 $global:LASTEXITCODE = 0   # "service not running" is fine
 
@@ -58,6 +61,13 @@ else {
 Step "npm ci" { npm ci --no-audit --no-fund }
 Step "npm run build" { npm run build }
 Step "pip install" { & "mt5-connector\.venv\Scripts\python.exe" -m pip install --disable-pip-version-check -r mt5-connector\requirements.txt }
+# The copier is optional; only touch it when it has actually been set up.
+$copierPython = "mt5-copier\.venv\Scripts\python.exe"
+$hasCopier = (Test-Path $copierPython) -and (Test-Path "mt5-copier\.env")
+if ($hasCopier) {
+    Step "pip install (copier)" { & $copierPython -m pip install --disable-pip-version-check -r mt5-copier\requirements.txt }
+}
 Step "start connector" { nssm start MT5MonitorConnector }
+if ($hasCopier) { Step "start copier" { nssm start MT5MonitorCopier } }
 Step "start web" { nssm start MT5MonitorWeb }
 Write-Host "deployed $(git rev-parse --short HEAD)"

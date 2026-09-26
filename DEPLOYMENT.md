@@ -141,6 +141,60 @@ git) are kept, so nothing is re-baselined and no false alerts are sent.
   first start (see `.env.example`).
 - **Change the initial passwords after the first login**: they are known to everyone who has repo access.
 
+## Trade copier (optional)
+
+The copier places real orders, so it is **off unless you install it**. Without
+`mt5-copier\.venv` and `mt5-copier\.env` the service is never created, the
+Copier page reports the service as unreachable, and nothing is copied.
+
+How the two sides differ matters for what you have to supply:
+
+* A **master** is only watched. It is an account on a broker you have already
+  added to MT5 Monitor, read through the Manager connection the connector
+  already holds. You do **not** need, and never store, that account's own
+  password.
+* A **destination** is traded on. That needs its MT5 **trading** password (an
+  investor password cannot place orders) and gets its own portable MT5
+  terminal, about 230 MB, under `C:\mt5-terminals`.
+
+Install it (Admin PowerShell, in `C:\apps\mt5-monitor`):
+
+```powershell
+python -m venv mt5-copier\.venv
+mt5-copier\.venv\Scripts\python.exe -m pip install -r mt5-copier\requirements.txt
+Copy-Item mt5-copier\.env.example mt5-copier\.env
+# then edit mt5-copier\.env:
+#   COPIER_SECRET    = a fresh 64-hex value
+#   CONNECTOR_SECRET = the same value as MT5_CONNECTOR_SECRET in .env
+# and add to the web app's .env:
+#   MT5_COPIER_SECRET = the same value as COPIER_SECRET above
+powershell -ExecutionPolicy Bypass -File deploy\install-services.ps1
+Invoke-RestMethod http://127.0.0.1:8766/health
+```
+
+MetaTrader 5 must be installed on the RDP at `C:\Program Files\MetaTrader 5`;
+each destination terminal is cloned from it.
+
+Then, in the app: an administrator turns on **Trade Copier** for the user
+(Admin → Users → permissions). It is off for everyone by default, including
+admins. The user adds a destination account, creates a link picking the
+master's broker and MT5 login, and starts it. **New links start stopped and in
+dry run** — watch the activity log agree with what the master is doing before
+switching one live.
+
+Safety worth knowing before you arm anything:
+
+* A link halts, and stays halted until a human arms it, if the destination
+  cannot trade, if the destination is netting rather than hedging, or if its
+  equity falls past the drawdown limit you set.
+* Arming resumes **from now**: whatever the master is holding at that moment is
+  left alone, so re-arming after a drawdown halt does not pile straight back in.
+* If the connector is down the master is unreadable, which is not the same as
+  the master having no positions — copies are never closed because of a failed
+  read.
+* "Close all" on a link closes only the positions that link opened. Manual
+  trades and other links are never touched.
+
 ## PostgreSQL (optional; not needed for a small team)
 
 Leave `DATABASE_URL` unset and everything runs from the JSON files in `data\`. If it is set, the app mirrors
