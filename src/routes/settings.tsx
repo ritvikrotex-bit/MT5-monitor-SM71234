@@ -256,7 +256,7 @@ function SettingsPage() {
                 <h3 className="text-xs font-semibold tracking-wide uppercase text-primary">
                   {telegramConfigured ? "Update Telegram Configuration" : "Configure Telegram Bot"}
                 </h3>
-                <ol className="list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
+                <ol className="list-decimal space-y-1 pl-4 text-xs break-words text-muted-foreground">
                   <li>
                     In Telegram open <span className="font-mono text-foreground">@BotFather</span>,
                     send <span className="font-mono text-foreground">/newbot</span> and copy the
@@ -270,7 +270,7 @@ function SettingsPage() {
                     Get the <b>chat ID</b>: message{" "}
                     <span className="font-mono text-foreground">@userinfobot</span> for a private
                     chat, or for a group open{" "}
-                    <span className="font-mono text-foreground">
+                    <span className="font-mono break-all text-foreground">
                       https://api.telegram.org/bot&lt;token&gt;/getUpdates
                     </span>{" "}
                     and copy <span className="font-mono">chat.id</span> (groups start with{" "}
