@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as BrokersRouteImport } from './routes/brokers'
+import { Route as CopierRouteImport } from './routes/copier'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as MonitoredRouteImport } from './routes/monitored'
 import { Route as SearchRouteImport } from './routes/search'
@@ -22,6 +23,7 @@ import { Route as AdminLogsRouteImport } from './routes/admin.logs'
 import { Route as AdminMonitoredRouteImport } from './routes/admin.monitored'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as ApiBrokersRouteImport } from './routes/api/brokers'
+import { Route as ApiCopierRouteImport } from './routes/api/copier'
 import { Route as ApiMonitoredRouteImport } from './routes/api/monitored'
 import { Route as ApiNotificationsRouteImport } from './routes/api/notifications'
 import { Route as ApiSessionRouteImport } from './routes/api/session'
@@ -39,15 +41,22 @@ import { Route as ApiAlertsPollRouteImport } from './routes/api/alerts/poll'
 import { Route as ApiAuthMeRouteImport } from './routes/api/auth.me'
 import { Route as ApiAuthSignupRouteImport } from './routes/api/auth.signup'
 import { Route as ApiBrokersIdRouteImport } from './routes/api/brokers.$id'
+import { Route as ApiCopierAccountsRouteImport } from './routes/api/copier.accounts'
+import { Route as ApiCopierLinksRouteImport } from './routes/api/copier.links'
 import { Route as ApiNotificationsTestTelegramRouteImport } from './routes/api/notifications.test-telegram'
 import { Route as ApiAdminUsersIdRouteImport } from './routes/api/admin/users.$id'
 import { Route as ApiBrokersIdStatusRouteImport } from './routes/api/brokers.$id.status'
 import { Route as ApiBrokersIdTestConnectionRouteImport } from './routes/api/brokers.$id.test-connection'
+import { Route as ApiCopierAccountsIdRouteImport } from './routes/api/copier.accounts.$id'
+import { Route as ApiCopierLinksIdRouteImport } from './routes/api/copier.links.$id'
 import { Route as ApiAdminUsersIdLimitsRouteImport } from './routes/api/admin/users.$id.limits'
 import { Route as ApiAdminUsersIdPermissionsRouteImport } from './routes/api/admin/users.$id.permissions'
 import { Route as ApiAdminUsersIdStatusRouteImport } from './routes/api/admin/users.$id.status'
 import { Route as ApiBrokersIdClientsLoginRouteImport } from './routes/api/brokers.$id.clients.$login'
 import { Route as ApiBrokersIdClientsSearchRouteImport } from './routes/api/brokers.$id.clients.search'
+import { Route as ApiCopierAccountsIdProbeRouteImport } from './routes/api/copier.accounts.$id.probe'
+import { Route as ApiCopierLinksIdArmRouteImport } from './routes/api/copier.links.$id.arm'
+import { Route as ApiCopierLinksIdFlattenRouteImport } from './routes/api/copier.links.$id.flatten'
 import { Route as ApiBrokersIdClientsLoginPositionsRouteImport } from './routes/api/brokers.$id.clients.$login.positions'
 
 const IndexRoute = IndexRouteImport.update({
@@ -58,6 +67,11 @@ const IndexRoute = IndexRouteImport.update({
 const BrokersRoute = BrokersRouteImport.update({
   id: '/brokers',
   path: '/brokers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CopierRoute = CopierRouteImport.update({
+  id: '/copier',
+  path: '/copier',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRoute = DashboardRouteImport.update({
@@ -113,6 +127,11 @@ const AdminSettingsRoute = AdminSettingsRouteImport.update({
 const ApiBrokersRoute = ApiBrokersRouteImport.update({
   id: '/api/brokers',
   path: '/api/brokers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCopierRoute = ApiCopierRouteImport.update({
+  id: '/api/copier',
+  path: '/api/copier',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiMonitoredRoute = ApiMonitoredRouteImport.update({
@@ -200,6 +219,16 @@ const ApiBrokersIdRoute = ApiBrokersIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => ApiBrokersRoute,
 } as any)
+const ApiCopierAccountsRoute = ApiCopierAccountsRouteImport.update({
+  id: '/accounts',
+  path: '/accounts',
+  getParentRoute: () => ApiCopierRoute,
+} as any)
+const ApiCopierLinksRoute = ApiCopierLinksRouteImport.update({
+  id: '/links',
+  path: '/links',
+  getParentRoute: () => ApiCopierRoute,
+} as any)
 const ApiNotificationsTestTelegramRoute =
   ApiNotificationsTestTelegramRouteImport.update({
     id: '/test-telegram',
@@ -222,6 +251,16 @@ const ApiBrokersIdTestConnectionRoute =
     path: '/test-connection',
     getParentRoute: () => ApiBrokersIdRoute,
   } as any)
+const ApiCopierAccountsIdRoute = ApiCopierAccountsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiCopierAccountsRoute,
+} as any)
+const ApiCopierLinksIdRoute = ApiCopierLinksIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiCopierLinksRoute,
+} as any)
 const ApiAdminUsersIdLimitsRoute = ApiAdminUsersIdLimitsRouteImport.update({
   id: '/limits',
   path: '/limits',
@@ -250,6 +289,22 @@ const ApiBrokersIdClientsSearchRoute =
     path: '/clients/search',
     getParentRoute: () => ApiBrokersIdRoute,
   } as any)
+const ApiCopierAccountsIdProbeRoute =
+  ApiCopierAccountsIdProbeRouteImport.update({
+    id: '/probe',
+    path: '/probe',
+    getParentRoute: () => ApiCopierAccountsIdRoute,
+  } as any)
+const ApiCopierLinksIdArmRoute = ApiCopierLinksIdArmRouteImport.update({
+  id: '/arm',
+  path: '/arm',
+  getParentRoute: () => ApiCopierLinksIdRoute,
+} as any)
+const ApiCopierLinksIdFlattenRoute = ApiCopierLinksIdFlattenRouteImport.update({
+  id: '/flatten',
+  path: '/flatten',
+  getParentRoute: () => ApiCopierLinksIdRoute,
+} as any)
 const ApiBrokersIdClientsLoginPositionsRoute =
   ApiBrokersIdClientsLoginPositionsRouteImport.update({
     id: '/positions',
@@ -260,6 +315,7 @@ const ApiBrokersIdClientsLoginPositionsRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/brokers': typeof BrokersRoute
+  '/copier': typeof CopierRoute
   '/dashboard': typeof DashboardRoute
   '/monitored': typeof MonitoredRoute
   '/search': typeof SearchRoute
@@ -270,6 +326,7 @@ export interface FileRoutesByFullPath {
   '/admin/monitored': typeof AdminMonitoredRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/api/brokers': typeof ApiBrokersRouteWithChildren
+  '/api/copier': typeof ApiCopierRouteWithChildren
   '/api/monitored': typeof ApiMonitoredRoute
   '/api/notifications': typeof ApiNotificationsRouteWithChildren
   '/api/session': typeof ApiSessionRoute
@@ -287,21 +344,29 @@ export interface FileRoutesByFullPath {
   '/api/auth/me': typeof ApiAuthMeRoute
   '/api/auth/signup': typeof ApiAuthSignupRoute
   '/api/brokers/$id': typeof ApiBrokersIdRouteWithChildren
+  '/api/copier/accounts': typeof ApiCopierAccountsRouteWithChildren
+  '/api/copier/links': typeof ApiCopierLinksRouteWithChildren
   '/api/notifications/test-telegram': typeof ApiNotificationsTestTelegramRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/api/admin/users/$id': typeof ApiAdminUsersIdRouteWithChildren
   '/api/brokers/$id/status': typeof ApiBrokersIdStatusRoute
   '/api/brokers/$id/test-connection': typeof ApiBrokersIdTestConnectionRoute
+  '/api/copier/accounts/$id': typeof ApiCopierAccountsIdRouteWithChildren
+  '/api/copier/links/$id': typeof ApiCopierLinksIdRouteWithChildren
   '/api/admin/users/$id/limits': typeof ApiAdminUsersIdLimitsRoute
   '/api/admin/users/$id/permissions': typeof ApiAdminUsersIdPermissionsRoute
   '/api/admin/users/$id/status': typeof ApiAdminUsersIdStatusRoute
   '/api/brokers/$id/clients/$login': typeof ApiBrokersIdClientsLoginRouteWithChildren
   '/api/brokers/$id/clients/search': typeof ApiBrokersIdClientsSearchRoute
+  '/api/copier/accounts/$id/probe': typeof ApiCopierAccountsIdProbeRoute
+  '/api/copier/links/$id/arm': typeof ApiCopierLinksIdArmRoute
+  '/api/copier/links/$id/flatten': typeof ApiCopierLinksIdFlattenRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/brokers': typeof BrokersRoute
+  '/copier': typeof CopierRoute
   '/dashboard': typeof DashboardRoute
   '/monitored': typeof MonitoredRoute
   '/search': typeof SearchRoute
@@ -312,6 +377,7 @@ export interface FileRoutesByTo {
   '/admin/monitored': typeof AdminMonitoredRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/api/brokers': typeof ApiBrokersRouteWithChildren
+  '/api/copier': typeof ApiCopierRouteWithChildren
   '/api/monitored': typeof ApiMonitoredRoute
   '/api/notifications': typeof ApiNotificationsRouteWithChildren
   '/api/session': typeof ApiSessionRoute
@@ -329,22 +395,30 @@ export interface FileRoutesByTo {
   '/api/auth/me': typeof ApiAuthMeRoute
   '/api/auth/signup': typeof ApiAuthSignupRoute
   '/api/brokers/$id': typeof ApiBrokersIdRouteWithChildren
+  '/api/copier/accounts': typeof ApiCopierAccountsRouteWithChildren
+  '/api/copier/links': typeof ApiCopierLinksRouteWithChildren
   '/api/notifications/test-telegram': typeof ApiNotificationsTestTelegramRoute
   '/admin/users': typeof AdminUsersIndexRoute
   '/api/admin/users/$id': typeof ApiAdminUsersIdRouteWithChildren
   '/api/brokers/$id/status': typeof ApiBrokersIdStatusRoute
   '/api/brokers/$id/test-connection': typeof ApiBrokersIdTestConnectionRoute
+  '/api/copier/accounts/$id': typeof ApiCopierAccountsIdRouteWithChildren
+  '/api/copier/links/$id': typeof ApiCopierLinksIdRouteWithChildren
   '/api/admin/users/$id/limits': typeof ApiAdminUsersIdLimitsRoute
   '/api/admin/users/$id/permissions': typeof ApiAdminUsersIdPermissionsRoute
   '/api/admin/users/$id/status': typeof ApiAdminUsersIdStatusRoute
   '/api/brokers/$id/clients/$login': typeof ApiBrokersIdClientsLoginRouteWithChildren
   '/api/brokers/$id/clients/search': typeof ApiBrokersIdClientsSearchRoute
+  '/api/copier/accounts/$id/probe': typeof ApiCopierAccountsIdProbeRoute
+  '/api/copier/links/$id/arm': typeof ApiCopierLinksIdArmRoute
+  '/api/copier/links/$id/flatten': typeof ApiCopierLinksIdFlattenRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/brokers': typeof BrokersRoute
+  '/copier': typeof CopierRoute
   '/dashboard': typeof DashboardRoute
   '/monitored': typeof MonitoredRoute
   '/search': typeof SearchRoute
@@ -355,6 +429,7 @@ export interface FileRoutesById {
   '/admin/monitored': typeof AdminMonitoredRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/api/brokers': typeof ApiBrokersRouteWithChildren
+  '/api/copier': typeof ApiCopierRouteWithChildren
   '/api/monitored': typeof ApiMonitoredRoute
   '/api/notifications': typeof ApiNotificationsRouteWithChildren
   '/api/session': typeof ApiSessionRoute
@@ -372,16 +447,23 @@ export interface FileRoutesById {
   '/api/auth/me': typeof ApiAuthMeRoute
   '/api/auth/signup': typeof ApiAuthSignupRoute
   '/api/brokers/$id': typeof ApiBrokersIdRouteWithChildren
+  '/api/copier/accounts': typeof ApiCopierAccountsRouteWithChildren
+  '/api/copier/links': typeof ApiCopierLinksRouteWithChildren
   '/api/notifications/test-telegram': typeof ApiNotificationsTestTelegramRoute
   '/admin/users/': typeof AdminUsersIndexRoute
   '/api/admin/users/$id': typeof ApiAdminUsersIdRouteWithChildren
   '/api/brokers/$id/status': typeof ApiBrokersIdStatusRoute
   '/api/brokers/$id/test-connection': typeof ApiBrokersIdTestConnectionRoute
+  '/api/copier/accounts/$id': typeof ApiCopierAccountsIdRouteWithChildren
+  '/api/copier/links/$id': typeof ApiCopierLinksIdRouteWithChildren
   '/api/admin/users/$id/limits': typeof ApiAdminUsersIdLimitsRoute
   '/api/admin/users/$id/permissions': typeof ApiAdminUsersIdPermissionsRoute
   '/api/admin/users/$id/status': typeof ApiAdminUsersIdStatusRoute
   '/api/brokers/$id/clients/$login': typeof ApiBrokersIdClientsLoginRouteWithChildren
   '/api/brokers/$id/clients/search': typeof ApiBrokersIdClientsSearchRoute
+  '/api/copier/accounts/$id/probe': typeof ApiCopierAccountsIdProbeRoute
+  '/api/copier/links/$id/arm': typeof ApiCopierLinksIdArmRoute
+  '/api/copier/links/$id/flatten': typeof ApiCopierLinksIdFlattenRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
 }
 export interface FileRouteTypes {
@@ -389,6 +471,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/brokers'
+    | '/copier'
     | '/dashboard'
     | '/monitored'
     | '/search'
@@ -399,6 +482,7 @@ export interface FileRouteTypes {
     | '/admin/monitored'
     | '/admin/settings'
     | '/api/brokers'
+    | '/api/copier'
     | '/api/monitored'
     | '/api/notifications'
     | '/api/session'
@@ -416,21 +500,29 @@ export interface FileRouteTypes {
     | '/api/auth/me'
     | '/api/auth/signup'
     | '/api/brokers/$id'
+    | '/api/copier/accounts'
+    | '/api/copier/links'
     | '/api/notifications/test-telegram'
     | '/admin/users/'
     | '/api/admin/users/$id'
     | '/api/brokers/$id/status'
     | '/api/brokers/$id/test-connection'
+    | '/api/copier/accounts/$id'
+    | '/api/copier/links/$id'
     | '/api/admin/users/$id/limits'
     | '/api/admin/users/$id/permissions'
     | '/api/admin/users/$id/status'
     | '/api/brokers/$id/clients/$login'
     | '/api/brokers/$id/clients/search'
+    | '/api/copier/accounts/$id/probe'
+    | '/api/copier/links/$id/arm'
+    | '/api/copier/links/$id/flatten'
     | '/api/brokers/$id/clients/$login/positions'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/brokers'
+    | '/copier'
     | '/dashboard'
     | '/monitored'
     | '/search'
@@ -441,6 +533,7 @@ export interface FileRouteTypes {
     | '/admin/monitored'
     | '/admin/settings'
     | '/api/brokers'
+    | '/api/copier'
     | '/api/monitored'
     | '/api/notifications'
     | '/api/session'
@@ -458,21 +551,29 @@ export interface FileRouteTypes {
     | '/api/auth/me'
     | '/api/auth/signup'
     | '/api/brokers/$id'
+    | '/api/copier/accounts'
+    | '/api/copier/links'
     | '/api/notifications/test-telegram'
     | '/admin/users'
     | '/api/admin/users/$id'
     | '/api/brokers/$id/status'
     | '/api/brokers/$id/test-connection'
+    | '/api/copier/accounts/$id'
+    | '/api/copier/links/$id'
     | '/api/admin/users/$id/limits'
     | '/api/admin/users/$id/permissions'
     | '/api/admin/users/$id/status'
     | '/api/brokers/$id/clients/$login'
     | '/api/brokers/$id/clients/search'
+    | '/api/copier/accounts/$id/probe'
+    | '/api/copier/links/$id/arm'
+    | '/api/copier/links/$id/flatten'
     | '/api/brokers/$id/clients/$login/positions'
   id:
     | '__root__'
     | '/'
     | '/brokers'
+    | '/copier'
     | '/dashboard'
     | '/monitored'
     | '/search'
@@ -483,6 +584,7 @@ export interface FileRouteTypes {
     | '/admin/monitored'
     | '/admin/settings'
     | '/api/brokers'
+    | '/api/copier'
     | '/api/monitored'
     | '/api/notifications'
     | '/api/session'
@@ -500,22 +602,30 @@ export interface FileRouteTypes {
     | '/api/auth/me'
     | '/api/auth/signup'
     | '/api/brokers/$id'
+    | '/api/copier/accounts'
+    | '/api/copier/links'
     | '/api/notifications/test-telegram'
     | '/admin/users/'
     | '/api/admin/users/$id'
     | '/api/brokers/$id/status'
     | '/api/brokers/$id/test-connection'
+    | '/api/copier/accounts/$id'
+    | '/api/copier/links/$id'
     | '/api/admin/users/$id/limits'
     | '/api/admin/users/$id/permissions'
     | '/api/admin/users/$id/status'
     | '/api/brokers/$id/clients/$login'
     | '/api/brokers/$id/clients/search'
+    | '/api/copier/accounts/$id/probe'
+    | '/api/copier/links/$id/arm'
+    | '/api/copier/links/$id/flatten'
     | '/api/brokers/$id/clients/$login/positions'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BrokersRoute: typeof BrokersRoute
+  CopierRoute: typeof CopierRoute
   DashboardRoute: typeof DashboardRoute
   MonitoredRoute: typeof MonitoredRoute
   SearchRoute: typeof SearchRoute
@@ -526,6 +636,7 @@ export interface RootRouteChildren {
   AdminMonitoredRoute: typeof AdminMonitoredRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   ApiBrokersRoute: typeof ApiBrokersRouteWithChildren
+  ApiCopierRoute: typeof ApiCopierRouteWithChildren
   ApiMonitoredRoute: typeof ApiMonitoredRoute
   ApiNotificationsRoute: typeof ApiNotificationsRouteWithChildren
   ApiSessionRoute: typeof ApiSessionRoute
@@ -559,6 +670,13 @@ declare module '@tanstack/react-router' {
       path: '/brokers'
       fullPath: '/brokers'
       preLoaderRoute: typeof BrokersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/copier': {
+      id: '/copier'
+      path: '/copier'
+      fullPath: '/copier'
+      preLoaderRoute: typeof CopierRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -636,6 +754,13 @@ declare module '@tanstack/react-router' {
       path: '/api/brokers'
       fullPath: '/api/brokers'
       preLoaderRoute: typeof ApiBrokersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/copier': {
+      id: '/api/copier'
+      path: '/api/copier'
+      fullPath: '/api/copier'
+      preLoaderRoute: typeof ApiCopierRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/monitored': {
@@ -757,6 +882,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiBrokersIdRouteImport
       parentRoute: typeof ApiBrokersRoute
     }
+    '/api/copier/accounts': {
+      id: '/api/copier/accounts'
+      path: '/accounts'
+      fullPath: '/api/copier/accounts'
+      preLoaderRoute: typeof ApiCopierAccountsRouteImport
+      parentRoute: typeof ApiCopierRoute
+    }
+    '/api/copier/links': {
+      id: '/api/copier/links'
+      path: '/links'
+      fullPath: '/api/copier/links'
+      preLoaderRoute: typeof ApiCopierLinksRouteImport
+      parentRoute: typeof ApiCopierRoute
+    }
     '/api/notifications/test-telegram': {
       id: '/api/notifications/test-telegram'
       path: '/test-telegram'
@@ -784,6 +923,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/brokers/$id/test-connection'
       preLoaderRoute: typeof ApiBrokersIdTestConnectionRouteImport
       parentRoute: typeof ApiBrokersIdRoute
+    }
+    '/api/copier/accounts/$id': {
+      id: '/api/copier/accounts/$id'
+      path: '/$id'
+      fullPath: '/api/copier/accounts/$id'
+      preLoaderRoute: typeof ApiCopierAccountsIdRouteImport
+      parentRoute: typeof ApiCopierAccountsRoute
+    }
+    '/api/copier/links/$id': {
+      id: '/api/copier/links/$id'
+      path: '/$id'
+      fullPath: '/api/copier/links/$id'
+      preLoaderRoute: typeof ApiCopierLinksIdRouteImport
+      parentRoute: typeof ApiCopierLinksRoute
     }
     '/api/admin/users/$id/limits': {
       id: '/api/admin/users/$id/limits'
@@ -819,6 +972,27 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/brokers/$id/clients/search'
       preLoaderRoute: typeof ApiBrokersIdClientsSearchRouteImport
       parentRoute: typeof ApiBrokersIdRoute
+    }
+    '/api/copier/accounts/$id/probe': {
+      id: '/api/copier/accounts/$id/probe'
+      path: '/probe'
+      fullPath: '/api/copier/accounts/$id/probe'
+      preLoaderRoute: typeof ApiCopierAccountsIdProbeRouteImport
+      parentRoute: typeof ApiCopierAccountsIdRoute
+    }
+    '/api/copier/links/$id/arm': {
+      id: '/api/copier/links/$id/arm'
+      path: '/arm'
+      fullPath: '/api/copier/links/$id/arm'
+      preLoaderRoute: typeof ApiCopierLinksIdArmRouteImport
+      parentRoute: typeof ApiCopierLinksIdRoute
+    }
+    '/api/copier/links/$id/flatten': {
+      id: '/api/copier/links/$id/flatten'
+      path: '/flatten'
+      fullPath: '/api/copier/links/$id/flatten'
+      preLoaderRoute: typeof ApiCopierLinksIdFlattenRouteImport
+      parentRoute: typeof ApiCopierLinksIdRoute
     }
     '/api/brokers/$id/clients/$login/positions': {
       id: '/api/brokers/$id/clients/$login/positions'
@@ -875,6 +1049,67 @@ const ApiBrokersRouteWithChildren = ApiBrokersRoute._addFileChildren(
   ApiBrokersRouteChildren,
 )
 
+interface ApiCopierAccountsIdRouteChildren {
+  ApiCopierAccountsIdProbeRoute: typeof ApiCopierAccountsIdProbeRoute
+}
+
+const ApiCopierAccountsIdRouteChildren: ApiCopierAccountsIdRouteChildren = {
+  ApiCopierAccountsIdProbeRoute: ApiCopierAccountsIdProbeRoute,
+}
+
+const ApiCopierAccountsIdRouteWithChildren =
+  ApiCopierAccountsIdRoute._addFileChildren(ApiCopierAccountsIdRouteChildren)
+
+interface ApiCopierAccountsRouteChildren {
+  ApiCopierAccountsIdRoute: typeof ApiCopierAccountsIdRouteWithChildren
+}
+
+const ApiCopierAccountsRouteChildren: ApiCopierAccountsRouteChildren = {
+  ApiCopierAccountsIdRoute: ApiCopierAccountsIdRouteWithChildren,
+}
+
+const ApiCopierAccountsRouteWithChildren =
+  ApiCopierAccountsRoute._addFileChildren(ApiCopierAccountsRouteChildren)
+
+interface ApiCopierLinksIdRouteChildren {
+  ApiCopierLinksIdArmRoute: typeof ApiCopierLinksIdArmRoute
+  ApiCopierLinksIdFlattenRoute: typeof ApiCopierLinksIdFlattenRoute
+}
+
+const ApiCopierLinksIdRouteChildren: ApiCopierLinksIdRouteChildren = {
+  ApiCopierLinksIdArmRoute: ApiCopierLinksIdArmRoute,
+  ApiCopierLinksIdFlattenRoute: ApiCopierLinksIdFlattenRoute,
+}
+
+const ApiCopierLinksIdRouteWithChildren =
+  ApiCopierLinksIdRoute._addFileChildren(ApiCopierLinksIdRouteChildren)
+
+interface ApiCopierLinksRouteChildren {
+  ApiCopierLinksIdRoute: typeof ApiCopierLinksIdRouteWithChildren
+}
+
+const ApiCopierLinksRouteChildren: ApiCopierLinksRouteChildren = {
+  ApiCopierLinksIdRoute: ApiCopierLinksIdRouteWithChildren,
+}
+
+const ApiCopierLinksRouteWithChildren = ApiCopierLinksRoute._addFileChildren(
+  ApiCopierLinksRouteChildren,
+)
+
+interface ApiCopierRouteChildren {
+  ApiCopierAccountsRoute: typeof ApiCopierAccountsRouteWithChildren
+  ApiCopierLinksRoute: typeof ApiCopierLinksRouteWithChildren
+}
+
+const ApiCopierRouteChildren: ApiCopierRouteChildren = {
+  ApiCopierAccountsRoute: ApiCopierAccountsRouteWithChildren,
+  ApiCopierLinksRoute: ApiCopierLinksRouteWithChildren,
+}
+
+const ApiCopierRouteWithChildren = ApiCopierRoute._addFileChildren(
+  ApiCopierRouteChildren,
+)
+
 interface ApiNotificationsRouteChildren {
   ApiNotificationsTestTelegramRoute: typeof ApiNotificationsTestTelegramRoute
 }
@@ -917,6 +1152,7 @@ const ApiAdminUsersRouteWithChildren = ApiAdminUsersRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BrokersRoute: BrokersRoute,
+  CopierRoute: CopierRoute,
   DashboardRoute: DashboardRoute,
   MonitoredRoute: MonitoredRoute,
   SearchRoute: SearchRoute,
@@ -927,6 +1163,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminMonitoredRoute: AdminMonitoredRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   ApiBrokersRoute: ApiBrokersRouteWithChildren,
+  ApiCopierRoute: ApiCopierRouteWithChildren,
   ApiMonitoredRoute: ApiMonitoredRoute,
   ApiNotificationsRoute: ApiNotificationsRouteWithChildren,
   ApiSessionRoute: ApiSessionRoute,

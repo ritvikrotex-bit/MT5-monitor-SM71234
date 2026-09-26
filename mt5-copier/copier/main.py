@@ -19,16 +19,25 @@ from pydantic import BaseModel, Field
 
 from copier.config import settings
 from copier.engine import Engine, Link
+from copier.sources import TerminalMaster
 from copier.pool import Account, CommandFailed, Pool, WorkerDown
+from copier.sources import ConnectorClient, MasterReader
 from copier.state import StateStore
 
 log = logging.getLogger("copier.main")
 
 pool = Pool(settings.terminals_root)
 state = StateStore(settings.state_dir / "copier-state.json")
+masters = MasterReader(
+    ConnectorClient(settings.connector_url, settings.connector_secret)
+    if settings.connector_secret
+    else None,
+    pool,
+)
 engine = Engine(
     pool,
     state,
+    masters,
     poll_interval=settings.poll_interval,
     snapshot_timeout=settings.snapshot_timeout,
     order_timeout=settings.order_timeout,
@@ -61,6 +70,9 @@ class AccountIn(BaseModel):
 
 class ConfigIn(BaseModel):
     accounts: list[AccountIn] = Field(default_factory=list)
+    """Destination accounts. Masters are read over the Manager API and need no
+    terminal, so they do not appear here."""
+
     links: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -93,13 +105,17 @@ def put_config(body: ConfigIn) -> dict[str, Any]:
         except (KeyError, TypeError, ValueError) as exc:
             problems.append(f"link {raw.get('id', '?')}: {exc}")
             continue
-        missing = [i for i in (link.master_id, link.dest_id) if i not in known]
-        if missing:
-            problems.append(f"link {link.id}: unknown account(s) {', '.join(missing)}")
+        if link.dest_id not in known:
+            problems.append(f"link {link.id}: unknown destination account {link.dest_id}")
             continue
-        if link.master_id == link.dest_id:
-            problems.append(f"link {link.id}: an account cannot copy onto itself")
-            continue
+        master = link.master
+        if isinstance(master, TerminalMaster):
+            if master.account_id not in known:
+                problems.append(f"link {link.id}: unknown master account {master.account_id}")
+                continue
+            if master.account_id == link.dest_id:
+                problems.append(f"link {link.id}: an account cannot copy onto itself")
+                continue
         links.append(link)
 
     pool.set_accounts(accounts)

@@ -23,6 +23,7 @@ from typing import Any, Callable
 
 from copier.pool import CommandFailed, Pool, WorkerDown
 from copier.rules import CopyRules, RuleError, SymbolIndex
+from copier.sources import MasterReader, MasterSpec, SourceUnavailable, parse_master
 from copier.state import LinkState, StateStore
 
 log = logging.getLogger("copier.engine")
@@ -55,7 +56,7 @@ class Link:
 
     id: str
     label: str
-    master_id: str
+    master: MasterSpec
     dest_id: str
     rules: CopyRules = field(default_factory=CopyRules)
     enabled: bool = False
@@ -75,7 +76,7 @@ class Link:
         return cls(
             id=str(raw["id"]),
             label=str(raw.get("label") or raw["id"]),
-            master_id=str(raw["masterId"]),
+            master=parse_master(raw["master"]),
             dest_id=str(raw["destId"]),
             rules=CopyRules.from_dict(raw.get("rules")),
             enabled=bool(raw.get("enabled")),
@@ -88,7 +89,7 @@ class Link:
         return {
             "id": self.id,
             "label": self.label,
-            "masterId": self.master_id,
+            "master": {"kind": type(self.master).__name__, "label": self.master.label},
             "destId": self.dest_id,
             "rules": self.rules.to_dict(),
             "enabled": self.enabled,
@@ -106,6 +107,7 @@ class Engine:
         self,
         pool: Pool,
         state: StateStore,
+        masters: MasterReader | None = None,
         *,
         poll_interval: float = 1.0,
         snapshot_timeout: float = 45.0,
@@ -115,6 +117,7 @@ class Engine:
     ) -> None:
         self.pool = pool
         self.state = state
+        self.masters = masters or MasterReader(None, pool)
         self.poll_interval = poll_interval
         self.snapshot_timeout = snapshot_timeout
         self.order_timeout = order_timeout
@@ -197,7 +200,7 @@ class Engine:
     def _safe_run(self, link: Link) -> None:
         try:
             self.run_link(link)
-        except (WorkerDown, CommandFailed) as exc:
+        except (WorkerDown, CommandFailed, SourceUnavailable) as exc:
             self._note_cycle(link, error=str(exc))
             log.warning("link %s: %s", link.label, exc)
         except Exception as exc:  # a bug in one link must not stop the rest
@@ -265,10 +268,8 @@ class Engine:
             self._note_cycle(link, halted=state.halted_reason)
             return
 
-        master_worker = self.pool.get(link.master_id)
-        dest_worker = self.pool.get(link.dest_id)
-        master = master_worker.call("snapshot", timeout=self.snapshot_timeout)
-        dest = dest_worker.call("snapshot", timeout=self.snapshot_timeout)
+        master = self.masters.snapshot(link.master)
+        dest = self.pool.get(link.dest_id).call("snapshot", timeout=self.snapshot_timeout)
 
         if not self._guards_pass(link, state, master, dest):
             return
@@ -322,11 +323,12 @@ class Engine:
         if not account.get("tradeAllowed"):
             self._halt(link, state, "the destination account is not allowed to trade")
             return False
-        if not account.get("hedging") and master["account"].get("hedging"):
+        if not account.get("hedging"):
             self._halt(
                 link, state,
-                "the master is hedging but the destination is netting; positions would "
-                "merge and closes would hit the wrong trade",
+                "the destination account is netting, not hedging; copies of separate "
+                "master trades would merge into one position and closes would hit the "
+                "wrong trade",
             )
             return False
 
@@ -480,7 +482,7 @@ class Engine:
                 target = self._target_volume(
                     link, master_position, master["account"], dest["account"], symbol
                 )
-            except (RuleError, CommandFailed, WorkerDown) as exc:
+            except (RuleError, CommandFailed, WorkerDown, SourceUnavailable) as exc:
                 log.debug("cannot size %s: %s", symbol, exc)
                 continue
 
@@ -543,7 +545,9 @@ class Engine:
         index = self._symbol_index(link.dest_id)
 
         # Oldest first, so a position cap fills in the order the master traded.
-        for master_ticket in sorted(master_by_ticket, key=lambda t: master_by_ticket[t]["openedAt"]):
+        # MT5 hands out tickets in order, and the Manager API gives no usable
+        # open time, so the ticket is the age.
+        for master_ticket in sorted(master_by_ticket):
             if master_ticket in state.mapping or master_ticket in ignored:
                 continue
             master_position = master_by_ticket[master_ticket]
@@ -564,7 +568,7 @@ class Engine:
                 volume = self._target_volume(
                     link, master_position, master["account"], dest["account"], dest_symbol
                 )
-            except (RuleError, CommandFailed, WorkerDown) as exc:
+            except (RuleError, CommandFailed, WorkerDown, SourceUnavailable) as exc:
                 state.record_failure(master_ticket, str(exc), now)
                 self._emit(
                     link, "skipped",

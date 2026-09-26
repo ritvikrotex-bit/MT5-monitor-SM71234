@@ -14,6 +14,7 @@ import pytest
 from copier.engine import Engine, Link
 from copier.pool import CommandFailed, WorkerDown
 from copier.rules import CopyRules
+from copier.sources import MasterReader, TerminalMaster
 from copier.state import StateStore
 
 SPEC = {"symbol": "", "digits": 2, "volumeMin": 0.01, "volumeMax": 30.0,
@@ -115,18 +116,26 @@ class FakePool:
         return {k: {"running": True} for k in self.accounts}
 
 
+def reader(pool: FakePool) -> MasterReader:
+    return MasterReader(None, pool)
+
+
+def terminal_master(account_id: str) -> TerminalMaster:
+    return TerminalMaster(label=account_id, account_id=account_id)
+
+
 @pytest.fixture
 def setup(tmp_path: Path):
     master = FakeAccount(100003, ["XAUUSD.c", "EURUSD.c", "BTCUSD.c"], balance=6494.88)
     dest = FakeAccount(910102, ["XAUUSD.s", "EURUSD.s"], balance=22016.01)
     pool = FakePool({"m": master, "d": dest})
     state = StateStore(tmp_path / "state.json")
-    engine = Engine(pool, state, poll_interval=0.01)
+    engine = Engine(pool, state, reader(pool), poll_interval=0.01)
 
     def make_link(**overrides) -> Link:
         rules = CopyRules(**overrides.pop("rules", {}))
-        link = Link(id="L1", label="test", master_id="m", dest_id="d", rules=rules,
-                    enabled=True, dry_run=False, **overrides)
+        link = Link(id="L1", label="test", master=terminal_master("m"), dest_id="d",
+                    rules=rules, enabled=True, dry_run=False, **overrides)
         engine.set_links([link])
         return link
 
@@ -235,8 +244,9 @@ def test_a_restart_does_not_re_copy_open_trades(setup, tmp_path):
     assert len(dest.positions) == 1
 
     # restart: brand new engine and state store reading the same file
+    fresh_pool = FakePool({"m": master, "d": dest})
     fresh_state = StateStore(state.path)
-    fresh = Engine(FakePool({"m": master, "d": dest}), fresh_state, poll_interval=0.01)
+    fresh = Engine(fresh_pool, fresh_state, reader(fresh_pool), poll_interval=0.01)
     fresh.set_links([link])
     fresh.run_link(link)
     assert len(dest.positions) == 1
@@ -251,8 +261,9 @@ def test_mapping_is_rebuilt_from_comments_when_the_state_file_is_lost(setup, tmp
 
     # lose the state file entirely
     state.path.unlink()
+    fresh_pool = FakePool({"m": master, "d": dest})
     fresh_state = StateStore(state.path)
-    fresh = Engine(FakePool({"m": master, "d": dest}), fresh_state, poll_interval=0.01)
+    fresh = Engine(fresh_pool, fresh_state, reader(fresh_pool), poll_interval=0.01)
     fresh.set_links([link])
     fresh.run_link(link)
 
@@ -365,7 +376,7 @@ def test_the_position_cap_is_respected(setup):
 
 def test_a_netting_destination_halts_the_link(setup):
     master, dest, engine, state, make_link = setup
-    dest.hedging = False
+    dest.hedging = False  # the master's own mode is irrelevant
     link = make_link()
     engine.run_link(link)
     assert state.get("L1").halted_reason is not None
@@ -419,10 +430,12 @@ def test_two_links_onto_one_destination_stay_separate(tmp_path):
     master_a = FakeAccount(1, ["XAUUSD.c"], balance=10_000)
     master_b = FakeAccount(2, ["XAUUSD.c"], balance=10_000)
     dest = FakeAccount(3, ["XAUUSD.s"], balance=10_000)
-    engine = Engine(FakePool({"a": master_a, "b": master_b, "d": dest}),
-                    StateStore(tmp_path / "s.json"), poll_interval=0.01)
-    link_a = Link(id="A", label="A", master_id="a", dest_id="d", enabled=True, dry_run=False)
-    link_b = Link(id="B", label="B", master_id="b", dest_id="d", enabled=True, dry_run=False)
+    pool = FakePool({"a": master_a, "b": master_b, "d": dest})
+    engine = Engine(pool, StateStore(tmp_path / "s.json"), reader(pool), poll_interval=0.01)
+    link_a = Link(id="A", label="A", master=terminal_master("a"), dest_id="d",
+                  enabled=True, dry_run=False)
+    link_b = Link(id="B", label="B", master=terminal_master("b"), dest_id="d",
+                  enabled=True, dry_run=False)
     engine.set_links([link_a, link_b])
     assert link_a.magic != link_b.magic
 
@@ -446,11 +459,13 @@ def test_one_master_fanned_out_to_two_destinations(tmp_path):
     master = FakeAccount(1, ["XAUUSD.c"], balance=10_000)
     dest_a = FakeAccount(2, ["XAUUSD.s"], balance=10_000)
     dest_b = FakeAccount(3, ["XAUUSD.s"], balance=20_000)
-    engine = Engine(FakePool({"m": master, "a": dest_a, "b": dest_b}),
-                    StateStore(tmp_path / "s.json"), poll_interval=0.01)
-    link_a = Link(id="A", label="A", master_id="m", dest_id="a", enabled=True, dry_run=False,
+    pool = FakePool({"m": master, "a": dest_a, "b": dest_b})
+    engine = Engine(pool, StateStore(tmp_path / "s.json"), reader(pool), poll_interval=0.01)
+    link_a = Link(id="A", label="A", master=terminal_master("m"), dest_id="a",
+                  enabled=True, dry_run=False,
                   rules=CopyRules(lot_mode="MULTIPLIER", lot_value=1.0))
-    link_b = Link(id="B", label="B", master_id="m", dest_id="b", enabled=True, dry_run=False,
+    link_b = Link(id="B", label="B", master=terminal_master("m"), dest_id="b",
+                  enabled=True, dry_run=False,
                   rules=CopyRules(lot_mode="MULTIPLIER", lot_value=2.0))
     engine.set_links([link_a, link_b])
     for link in (link_a, link_b):

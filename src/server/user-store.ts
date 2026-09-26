@@ -16,6 +16,8 @@ export type UserPermissions = {
   canUseTelegram: boolean;
   canUseEmail: boolean;
   canUsePush: boolean;
+  /** Set up trade copying. Off by default: it places real orders. */
+  canUseCopier: boolean;
 };
 
 export type UserLimits = {
@@ -55,6 +57,9 @@ export const DEFAULT_USER_PERMISSIONS: UserPermissions = {
   canUseTelegram: true,
   canUseEmail: true,
   canUsePush: true,
+  // The copier places real orders on a real account, so it is granted
+  // deliberately by an administrator rather than handed to every new user.
+  canUseCopier: false,
 };
 
 export const DEFAULT_USER_LIMITS: UserLimits = {
@@ -70,6 +75,7 @@ export const ADMIN_PERMISSIONS: UserPermissions = {
   canUseTelegram: true,
   canUseEmail: true,
   canUsePush: true,
+  canUseCopier: false, // oversight account: it does not trade
 };
 
 export const ADMIN_LIMITS: UserLimits = {

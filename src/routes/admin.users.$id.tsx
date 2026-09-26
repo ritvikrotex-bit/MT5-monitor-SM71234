@@ -75,6 +75,7 @@ function UserDetailPage() {
     canUseTelegram: true,
     canUseEmail: true,
     canUsePush: true,
+    canUseCopier: false,
   });
 
   // Editable Limits State
@@ -385,6 +386,11 @@ function UserDetailPage() {
                       key: "canUsePush",
                       label: "Browser Push Alerts",
                       desc: "User can receive push messages",
+                    },
+                    {
+                      key: "canUseCopier",
+                      label: "Trade Copier",
+                      desc: "User can copy trades onto live accounts",
                     },
                   ].map((item) => {
                     const active = permissions[item.key as keyof UserPermissions];

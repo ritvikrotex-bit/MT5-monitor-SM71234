@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     copier_host: str = "127.0.0.1"
     copier_port: int = 8766
 
+    connector_url: str = "http://127.0.0.1:8765"
+    """mt5-connector, which reads master accounts over the Manager API."""
+
+    connector_secret: str = ""
+    """Shared secret for the connector. Required for manager-based masters."""
+
     terminals_root: Path = Path(r"C:\mt5-terminals")
     """Where each account's portable MT5 terminal is provisioned."""
 

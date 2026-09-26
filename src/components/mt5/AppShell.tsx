@@ -7,6 +7,7 @@ import {
   Settings,
   Radar,
   Activity,
+  Copy,
   ShieldCheck,
   Shield,
 } from "lucide-react";
@@ -14,7 +15,7 @@ import { ThemeToggle } from "@/components/mt5/ThemeToggle";
 import { cn } from "@/lib/utils";
 import { brokerName, useApp, useHydrateBrokers, useHydrateSession } from "@/lib/app-store";
 
-const nav = [
+const baseNav = [
   { to: "/dashboard", label: "Home", desktopLabel: "Dashboard", icon: Home },
   { to: "/brokers", label: "Brokers", desktopLabel: "Brokers", icon: Building2 },
   { to: "/search", label: "Search", desktopLabel: "Search", icon: Search },
@@ -22,6 +23,15 @@ const nav = [
   { to: "/notifications", label: "Alerts", desktopLabel: "Notifications", icon: Bell },
   { to: "/settings", label: "Settings", desktopLabel: "Settings", icon: Settings },
 ] as const;
+
+// The copier only appears for accounts an administrator has granted it, since
+// it is the one part of the app that places orders rather than reading them.
+const copierNav = {
+  to: "/copier",
+  label: "Copier",
+  desktopLabel: "Trade Copier",
+  icon: Copy,
+} as const;
 
 function useUnread() {
   return useApp((s) => s.notifications.filter((n) => !s.readIds.includes(n.id)).length);
@@ -45,6 +55,9 @@ export function AppShell({
   const activeBroker = useApp((s) => s.brokers.find((b) => b.id === s.activeBrokerId));
   const currentUser = useApp((s) => s.user);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const canCopy = currentUser?.permissions?.["canUseCopier"] === true;
+  const nav = canCopy ? [...baseNav, copierNav] : [...baseNav];
+  // Brokers stays off the phone bar to keep it short; the rest flows to fit.
   const mobileNav = nav.filter((n) => n.to !== "/brokers");
 
   return (
@@ -145,7 +158,10 @@ export function AppShell({
 
         {/* Mobile bottom nav */}
         <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden">
-          <div className="grid grid-cols-5">
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}
+          >
             {mobileNav.map((item) => {
               const active = pathname.startsWith(item.to);
               return (

@@ -32,7 +32,8 @@ export type AuditLogEntry = {
   actorEmail: string;
   actorRole: "ADMIN" | "USER" | "SYSTEM";
   action: AuditLogAction | string;
-  targetType: "USER" | "BROKER" | "MONITOR" | "SYSTEM" | "NOTIFICATION";
+  targetType:
+    "USER" | "BROKER" | "MONITOR" | "SYSTEM" | "NOTIFICATION" | "COPIER_ACCOUNT" | "COPIER_LINK";
   targetId?: string | undefined;
   details?: Record<string, unknown> | undefined;
   ipAddress?: string | undefined;
@@ -131,7 +132,8 @@ export function logAudit(entry: {
   actorEmail: string;
   actorRole: "ADMIN" | "USER" | "SYSTEM";
   action: AuditLogAction | string;
-  targetType: "USER" | "BROKER" | "MONITOR" | "SYSTEM" | "NOTIFICATION";
+  targetType:
+    "USER" | "BROKER" | "MONITOR" | "SYSTEM" | "NOTIFICATION" | "COPIER_ACCOUNT" | "COPIER_LINK";
   targetId?: string | undefined;
   details?: Record<string, unknown> | undefined;
   ipAddress?: string | undefined;

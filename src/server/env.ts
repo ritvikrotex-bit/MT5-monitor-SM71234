@@ -28,3 +28,10 @@ export function monitorPollIntervalMs(): number {
     Math.min(300, Math.max(1, Number.isFinite(seconds) ? seconds : DEFAULT_POLL_SECONDS)) * 1_000
   );
 }
+
+export const copierUrl = () =>
+  envOptional("MT5_COPIER_URL", "http://127.0.0.1:8766").replace(/\/$/, "");
+
+// Like the connector secret: no default, so a missing value fails loudly
+// instead of silently falling back to something guessable.
+export const copierSecret = () => env("MT5_COPIER_SECRET", envOptional("COPIER_SECRET"));
