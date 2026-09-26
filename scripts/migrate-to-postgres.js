@@ -76,7 +76,6 @@ async function runMigration() {
     let totalBrokers = 0;
     let totalMonitored = 0;
     let totalAudit = 0;
-    let totalTelegram = 0;
     let totalAlerts = 0;
 
     // 1. Migrate Users
@@ -229,28 +228,7 @@ async function runMigration() {
       }
     }
 
-    // 5. Migrate Telegram Config
-    const telegramFile = join(dataDir, "telegram.json");
-    if (existsSync(telegramFile)) {
-      try {
-        const cfg = JSON.parse(readFileSync(telegramFile, "utf-8"));
-        if (cfg.botToken && cfg.chatId) {
-          await client.query(
-            `INSERT INTO telegram_config (id, bot_token, chat_id, updated_at)
-             VALUES ('primary', $1, $2, NOW())
-             ON CONFLICT (id) DO UPDATE SET
-               bot_token = EXCLUDED.bot_token,
-               chat_id = EXCLUDED.chat_id,
-               updated_at = NOW();`,
-            [cfg.botToken, cfg.chatId],
-          );
-          totalTelegram = 1;
-          console.log(`✅ Telegram configuration migrated.`);
-        }
-      } catch (err) {
-        console.error("⚠️ Failed to parse/migrate telegram.json:", err.message);
-      }
-    }
+    // Telegram settings are per user (encrypted in data/telegram.json) and are not mirrored to PostgreSQL.
 
     console.log("\n🎉 Database migration to PostgreSQL completed successfully!");
     console.log("Summary:");
@@ -258,7 +236,6 @@ async function runMigration() {
     console.log(`  - Brokers: ${totalBrokers}`);
     console.log(`  - Monitored Accounts: ${totalMonitored}`);
     console.log(`  - Audit Logs: ${totalAudit}`);
-    console.log(`  - Telegram Settings: ${totalTelegram ? "Configured" : "None"}`);
   } finally {
     client.release();
     await pool.end();

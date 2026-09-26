@@ -68,12 +68,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
 
-CREATE TABLE IF NOT EXISTS telegram_config (
-  id VARCHAR(32) PRIMARY KEY DEFAULT 'primary',
-  bot_token TEXT NOT NULL,
-  chat_id TEXT NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
+-- Telegram settings are per user and live (encrypted) in data/telegram.json; they are intentionally not mirrored here.
 
 CREATE TABLE IF NOT EXISTS alerts (
   id VARCHAR(64) PRIMARY KEY,

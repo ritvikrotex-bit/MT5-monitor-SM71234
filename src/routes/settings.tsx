@@ -37,8 +37,8 @@ const eventOrder: NotificationType[] = [
 
 function SettingsPage() {
   const s = useAppState();
-  // The Telegram bot/chat is one shared setting, so only administrators may change or test it.
-  const isAdmin = s.role === "ADMIN";
+  // Telegram is per user. An administrator can switch it off for an account (canUseTelegram).
+  const telegramAllowed = s.user?.permissions?.["canUseTelegram"] !== false;
   const navigate = useNavigate();
   const [signingOut, setSigningOut] = useState(false);
   const [telegramConfigured, setTelegramConfigured] = useState(false);
@@ -47,6 +47,7 @@ function SettingsPage() {
   const [showTelegramForm, setShowTelegramForm] = useState(false);
   const [savingTelegram, setSavingTelegram] = useState(false);
   const [testingTelegram, setTestingTelegram] = useState(false);
+  const [removingTelegram, setRemovingTelegram] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => {
@@ -93,6 +94,32 @@ function SettingsPage() {
       setTestResult({ ok: false, message: "Network error saving Telegram settings." });
     } finally {
       setSavingTelegram(false);
+    }
+  };
+
+  const handleRemoveTelegram = async () => {
+    if (
+      removingTelegram ||
+      !window.confirm("Disconnect Telegram? You will stop receiving alerts there.")
+    )
+      return;
+    setRemovingTelegram(true);
+    setTestResult(null);
+    try {
+      const res = await fetch("/api/notifications", { method: "DELETE" });
+      if (res.ok) {
+        setTelegramConfigured(false);
+        setChatId("");
+        setBotToken("");
+        setShowTelegramForm(false);
+        setTestResult({ ok: true, message: "Telegram disconnected." });
+      } else {
+        setTestResult({ ok: false, message: "Could not disconnect Telegram." });
+      }
+    } catch {
+      setTestResult({ ok: false, message: "Network error reaching server." });
+    } finally {
+      setRemovingTelegram(false);
     }
   };
 
@@ -182,13 +209,13 @@ function SettingsPage() {
                   ? chatId
                     ? `Connected to Chat ID: ${chatId}`
                     : "Configured securely on server"
-                  : isAdmin
-                    ? "Set Telegram Bot Token and Chat ID to receive live trade alerts"
-                    : "Not configured yet — ask an administrator to set up the Telegram bot"
+                  : telegramAllowed
+                    ? "Add your own Telegram bot to receive alerts for your monitored clients"
+                    : "Telegram alerts are disabled for your account — contact your administrator"
               }
               active={telegramConfigured}
               action={
-                !isAdmin ? null : (
+                !telegramAllowed ? null : (
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -207,11 +234,21 @@ function SettingsPage() {
                         {testingTelegram ? "Sending..." : "Test Bot"}
                       </button>
                     )}
+                    {telegramConfigured && (
+                      <button
+                        type="button"
+                        onClick={handleRemoveTelegram}
+                        disabled={removingTelegram}
+                        className="rounded-lg border border-destructive/40 px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                      >
+                        {removingTelegram ? "Removing..." : "Disconnect"}
+                      </button>
+                    )}
                   </div>
                 )
               }
             />
-            {isAdmin && showTelegramForm && (
+            {telegramAllowed && showTelegramForm && (
               <form
                 onSubmit={handleSaveTelegram}
                 className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3"
@@ -219,15 +256,37 @@ function SettingsPage() {
                 <h3 className="text-xs font-semibold tracking-wide uppercase text-primary">
                   {telegramConfigured ? "Update Telegram Configuration" : "Configure Telegram Bot"}
                 </h3>
+                <ol className="list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
+                  <li>
+                    In Telegram open <span className="font-mono text-foreground">@BotFather</span>,
+                    send <span className="font-mono text-foreground">/newbot</span> and copy the
+                    <b> bot token</b> it gives you.
+                  </li>
+                  <li>
+                    Add your bot to the group or channel that should get alerts (or open a chat with
+                    it and press Start), then send any message there.
+                  </li>
+                  <li>
+                    Get the <b>chat ID</b>: message{" "}
+                    <span className="font-mono text-foreground">@userinfobot</span> for a private
+                    chat, or for a group open{" "}
+                    <span className="font-mono text-foreground">
+                      https://api.telegram.org/bot&lt;token&gt;/getUpdates
+                    </span>{" "}
+                    and copy <span className="font-mono">chat.id</span> (groups start with{" "}
+                    <span className="font-mono">-</span>).
+                  </li>
+                  <li>Paste both below. A test message is sent before anything is saved.</li>
+                </ol>
                 <p className="text-xs text-muted-foreground">
-                  Create a bot with <span className="font-mono text-foreground">@BotFather</span> on
-                  Telegram and obtain your Bot Token and your personal Chat ID (or group/channel
-                  ID).
+                  Alerts for <b>your</b> monitored clients go only to <b>your</b> chat. Other users
+                  cannot see it.
                 </p>
                 <div className="space-y-1">
                   <label className="text-xs font-medium">Telegram Bot Token</label>
                   <input
-                    type="text"
+                    type="password"
+                    autoComplete="off"
                     required
                     placeholder="e.g. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
                     value={botToken}
