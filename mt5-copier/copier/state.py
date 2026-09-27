@@ -38,6 +38,10 @@ class LinkState:
     """master ticket -> destination ticket."""
     ignored: list[int] = field(default_factory=list)
     """Master tickets deliberately not copied (open before the link started)."""
+    manual_closes: set[int] = field(default_factory=set)
+    """Master tickets whose slave copy was manually closed while the master was
+    still open.  The engine will not re-open these until the master itself closes
+    the trade (at which point the entry is cleared)."""
     failures: dict[int, dict[str, Any]] = field(default_factory=dict)
     """master ticket -> {attempts, nextTry, reason}."""
     baseline_equity: float | None = None
@@ -53,6 +57,7 @@ class LinkState:
             "seeded": self.seeded,
             "mapping": {str(k): v for k, v in self.mapping.items()},
             "ignored": sorted(self.ignored),
+            "manualCloses": sorted(self.manual_closes),
             "failures": {str(k): v for k, v in self.failures.items()},
             "baselineEquity": self.baseline_equity,
             "haltedReason": self.halted_reason,
@@ -67,6 +72,7 @@ class LinkState:
             seeded=bool(raw.get("seeded")),
             mapping={int(k): int(v) for k, v in (raw.get("mapping") or {}).items()},
             ignored=[int(t) for t in (raw.get("ignored") or [])],
+            manual_closes={int(t) for t in (raw.get("manualCloses") or [])},
             failures={int(k): v for k, v in (raw.get("failures") or {}).items()},
             baseline_equity=raw.get("baselineEquity"),
             halted_reason=raw.get("haltedReason"),

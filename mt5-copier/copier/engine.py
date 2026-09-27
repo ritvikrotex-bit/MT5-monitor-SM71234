@@ -290,7 +290,25 @@ class Engine:
         dest_by_ticket = {int(p["ticket"]): p for p in owned}
         master_by_ticket = {int(p["ticket"]): p for p in master["positions"]}
 
+        # Snapshot the mapping so we can detect what disappeared after rebuild.
+        pre_mapping = dict(state.mapping)
+
         self._rebuild_mapping(link, state, owned, dest_by_ticket)
+
+        # Detect manually closed slave positions: a master ticket was in our
+        # mapping before this cycle but its slave copy is now gone — even though
+        # the master is still holding the trade.  That means the user closed it
+        # on the slave side themselves.  Record it so we do not re-open it.
+        for mt, dt in pre_mapping.items():
+            if mt not in state.mapping and mt in master_by_ticket:
+                if mt not in state.manual_closes:
+                    state.manual_closes.add(mt)
+                    self._emit(
+                        link, "manual_close",
+                        f"slave position #{dt} for master #{mt} was manually closed; "
+                        f"will not re-copy while master holds the trade open",
+                        masterTicket=mt, ticket=dt,
+                    )
 
         if not state.seeded:
             if not link.rules.copy_existing:
@@ -304,8 +322,9 @@ class Engine:
                         tickets=state.ignored,
                     )
             state.seeded = True
-        # Forget ignored tickets once the master closes them, so the list cannot grow forever.
+        # Forget ignored and manual-close tickets once the master closes them.
         state.ignored = [t for t in state.ignored if t in master_by_ticket]
+        state.manual_closes = {t for t in state.manual_closes if t in master_by_ticket}
 
         self._close_orphans(link, state, master_by_ticket, dest_by_ticket)
         self._sync_open(link, state, master, dest, master_by_ticket, dest_by_ticket)
@@ -618,6 +637,8 @@ class Engine:
         for master_ticket in sorted(master_by_ticket):
             if master_ticket in state.mapping or master_ticket in ignored:
                 continue
+            if master_ticket in state.manual_closes:
+                continue  # user closed this on the slave — do not re-open
             master_position = master_by_ticket[master_ticket]
             symbol = master_position["symbol"]
 

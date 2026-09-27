@@ -577,6 +577,114 @@ def test_the_same_skip_is_not_reported_on_every_retry(setup):
     assert len(skips) == 1, f"reported the same skip {len(skips)} times"
 
 
+# -- manual close tracking -------------------------------------------------
+
+def test_manual_slave_close_is_not_re_opened(setup):
+    """The most important safety property: if the user closes a slave position
+    themselves while the master is still holding the trade, the copier must
+    never open it again for the lifetime of that master trade.
+    """
+    master, dest, engine, state, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+
+    master_ticket = master.add("XAUUSD.c", "BUY", 0.10)
+    engine.run_link(link)
+    assert len(dest.positions) == 1
+
+    # User manually deletes the slave position (master is still open).
+    dest.positions.clear()
+
+    # Should NOT re-open on subsequent cycles.
+    for _ in range(5):
+        engine.run_link(link)
+
+    assert dest.positions == {}, "copier re-opened a manually closed slave position"
+    assert master_ticket in state.get("L1").manual_closes
+
+
+def test_manual_close_emits_an_event(setup):
+    master, dest, engine, state, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+    master.add("XAUUSD.c", "BUY", 0.10)
+    engine.run_link(link)
+
+    dest.positions.clear()
+    engine.run_link(link)
+
+    events = engine.events()
+    assert any(e["kind"] == "manual_close" for e in events), \
+        "no manual_close event emitted"
+
+
+def test_manual_close_entry_cleared_when_master_closes(setup):
+    """Once the master itself closes the trade, the manual-close entry is
+    removed.  A future re-open of the same instrument starts fresh.
+    """
+    master, dest, engine, state, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+
+    master_ticket = master.add("XAUUSD.c", "BUY", 0.10)
+    engine.run_link(link)
+    dest.positions.clear()  # manual close on slave
+
+    engine.run_link(link)
+    assert master_ticket in state.get("L1").manual_closes
+
+    # Master closes its own position.
+    del master.positions[master_ticket]
+    engine.run_link(link)
+
+    assert master_ticket not in state.get("L1").manual_closes, \
+        "manual_closes entry was not cleared when the master closed"
+
+
+def test_after_master_closes_a_new_copy_starts_fresh(setup):
+    """After a manual close and then a real master close, opening the same
+    instrument again later must copy normally — no leftover inhibition.
+    """
+    master, dest, engine, state, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+
+    master_ticket = master.add("XAUUSD.c", "BUY", 0.10)
+    engine.run_link(link)
+    dest.positions.clear()  # manual close on slave
+    engine.run_link(link)   # detected
+    del master.positions[master_ticket]
+    engine.run_link(link)   # master closed; inhibition cleared
+
+    # Master opens a new trade in the same direction.
+    master.add("XAUUSD.c", "BUY", 0.05)
+    engine.run_link(link)
+
+    assert len(dest.positions) == 1, "new master trade was not copied after inhibition cleared"
+
+
+def test_manual_close_survives_a_restart(setup, tmp_path):
+    """manual_closes is persisted so a service restart does not forget it."""
+    master, dest, engine, state, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+
+    master_ticket = master.add("XAUUSD.c", "BUY", 0.10)
+    engine.run_link(link)
+    dest.positions.clear()  # manual close on slave
+    engine.run_link(link)
+
+    # Restart.
+    fresh_pool = FakePool({"m": master, "d": dest})
+    fresh_state = StateStore(state.path)
+    fresh = Engine(fresh_pool, fresh_state, reader(fresh_pool), poll_interval=0.01)
+    fresh.set_links([link])
+    fresh.run_link(link)
+
+    assert dest.positions == {}, "copier re-opened after restart"
+    assert master_ticket in fresh_state.get("L1").manual_closes
+
+
 def test_a_changed_reason_is_reported_again(setup):
     master, dest, engine, store, make_link = setup
     link = make_link()

@@ -34,6 +34,7 @@ const NOTIFY = new Set([
   "error", // an order failed
   "halted", // a guard stopped the link
   "duplicate", // a stray copy was cleaned up
+  "manual_close", // user manually closed a slave position; master still open
 ]);
 
 type Cursor = { seq: number };
@@ -114,6 +115,13 @@ export function formatCopierEvent(event: CopierEvent): string {
       return `${head("⚪", "Trade not copied")}\n\n${event.message}${dry}`;
     case "duplicate":
       return `${head("🟠", "Duplicate copy removed")}\n\n${event.message}`;
+    case "manual_close":
+      return (
+        `${head("🙋", "Slave position manually closed")}\n\n` +
+        `Master · ${master}  #${event.masterTicket}\n` +
+        `Slave · ${dest}  #${event.ticket} was manually closed.\n\n` +
+        `The copier will not re-open it while the master trade is still active.`
+      );
     case "halted":
       return (
         `${head("⛔", "Copy link halted")}\n\n${event.message}\n\n` +
