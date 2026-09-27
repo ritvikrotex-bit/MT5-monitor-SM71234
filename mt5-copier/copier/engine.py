@@ -40,6 +40,10 @@ MAGIC_PREFIX = 0x5C000000
 SYMBOL_CACHE_TTL = 300.0
 
 
+class SymbolLookupFailed(Exception):
+    """A master symbol could not be translated to a tradable destination one."""
+
+
 def magic_for(link_id: str) -> int:
     """Stable per-link magic number derived from the link id."""
     return MAGIC_PREFIX | (zlib.crc32(link_id.encode()) & 0x00FFFFFF)
@@ -238,10 +242,10 @@ class Engine:
 
     # -- caches ------------------------------------------------------------
 
-    def _symbol_index(self, account_id: str) -> SymbolIndex:
+    def _symbol_index(self, account_id: str, *, refresh: bool = False) -> SymbolIndex:
         cached = self._symbols.get(account_id)
         now = time.time()
-        if cached and now - cached[0] < SYMBOL_CACHE_TTL:
+        if cached and not refresh and now - cached[0] < SYMBOL_CACHE_TTL:
             return cached[1]
         result = self.pool.get(account_id).call("symbols", timeout=self.snapshot_timeout)
         index = SymbolIndex(result.get("symbols") or [])
@@ -443,6 +447,60 @@ class Engine:
                 state.mapping.pop(master_ticket, None)
                 state.last_action_at = time.time()
 
+    def _skip(
+        self,
+        link: Link,
+        state: LinkState,
+        master_ticket: int,
+        symbol: str,
+        reason: str,
+        now: float,
+    ) -> None:
+        """Record a skip, reporting it only when it is news.
+
+        Skips are retried on a backoff, and saying the same thing every retry
+        buries everything else in the activity log.
+        """
+        previous = (state.failures.get(master_ticket) or {}).get("reason")
+        state.record_failure(master_ticket, reason, now)
+        if previous != reason:
+            self._emit(
+                link, "skipped",
+                f"not copying master #{master_ticket} ({symbol}): {reason}",
+                masterTicket=master_ticket,
+            )
+
+    def _resolve_and_size(
+        self,
+        link: Link,
+        master_position: dict[str, Any],
+        master_account: dict[str, Any],
+        dest_account: dict[str, Any],
+        index: SymbolIndex,
+    ) -> tuple[str, float]:
+        """Translate the symbol and size the order, against the live terminal.
+
+        Both steps can fail because of a stale symbol list, so they are raised
+        as one kind of error the caller can retry after refreshing.
+        """
+        symbol = master_position["symbol"]
+        try:
+            dest_symbol = link.rules.resolve_symbol(symbol, index)
+        except RuleError as exc:
+            raise SymbolLookupFailed(str(exc)) from exc
+        try:
+            volume = self._target_volume(
+                link, master_position, master_account, dest_account, dest_symbol
+            )
+        except CommandFailed as exc:
+            # The worker could not find or select it — that answer is authoritative.
+            if exc.code in {"SYMBOL_UNKNOWN", "SYMBOL_UNAVAILABLE"}:
+                raise SymbolLookupFailed(f"{dest_symbol} is not tradable on the destination") from exc
+            raise
+        except RuleError as exc:
+            raise SymbolLookupFailed(str(exc)) from exc
+        return dest_symbol, volume
+
     def _target_volume(
         self,
         link: Link,
@@ -543,6 +601,7 @@ class Engine:
         ignored = set(state.ignored)
         now = time.time()
         index = self._symbol_index(link.dest_id)
+        refreshed = False
 
         # Oldest first, so a position cap fills in the order the master traded.
         # MT5 hands out tickets in order, and the Manager API gives no usable
@@ -564,30 +623,35 @@ class Engine:
                 continue
 
             try:
-                dest_symbol = link.rules.resolve_symbol(symbol, index)
-                volume = self._target_volume(
-                    link, master_position, master["account"], dest["account"], dest_symbol
+                dest_symbol, volume = self._resolve_and_size(
+                    link, master_position, master["account"], dest["account"], index
                 )
-            except (RuleError, CommandFailed, WorkerDown, SourceUnavailable) as exc:
-                state.record_failure(master_ticket, str(exc), now)
-                self._emit(
-                    link, "skipped",
-                    f"not copying master #{master_ticket} ({symbol}): {exc}",
-                    masterTicket=master_ticket,
-                )
+            except SymbolLookupFailed as exc:
+                # The list we matched against may simply not have caught up with
+                # the broker yet, so re-read it once per cycle before believing
+                # an instrument is unavailable.
+                if refreshed:
+                    self._skip(link, state, master_ticket, symbol, str(exc), now)
+                    continue
+                refreshed = True
+                index = self._symbol_index(link.dest_id, refresh=True)
+                try:
+                    dest_symbol, volume = self._resolve_and_size(
+                        link, master_position, master["account"], dest["account"], index
+                    )
+                except SymbolLookupFailed as retry_exc:
+                    self._skip(link, state, master_ticket, symbol, str(retry_exc), now)
+                    continue
+            except (CommandFailed, WorkerDown, SourceUnavailable) as exc:
+                self._skip(link, state, master_ticket, symbol, str(exc), now)
                 continue
 
             if volume <= 0:
                 spec = self._specs.get((link.dest_id, dest_symbol), (0, {}))[1]
-                reason = (
-                    f"the scaled lot is below the {dest_symbol} minimum of "
-                    f"{spec.get('volumeMin')}"
-                )
-                state.record_failure(master_ticket, reason, now)
-                self._emit(
-                    link, "skipped",
-                    f"not copying master #{master_ticket} ({symbol}): {reason}",
-                    masterTicket=master_ticket,
+                self._skip(
+                    link, state, master_ticket, symbol,
+                    f"the scaled lot is below the {dest_symbol} minimum of {spec.get('volumeMin')}",
+                    now,
                 )
                 continue
 

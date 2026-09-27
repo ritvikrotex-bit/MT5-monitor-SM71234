@@ -45,10 +45,16 @@ def test_ambiguous_base_needs_a_suffix():
     assert CopyRules(symbol_suffix=".s").resolve_symbol("XAUUSD.c", index) == "XAUUSD.s"
 
 
-def test_mapped_to_a_symbol_the_destination_lacks():
-    rules = CopyRules(symbol_map={"XAUUSD.c": "XAUUSD.zz"})
-    with pytest.raises(RuleError, match="does not offer"):
-        rules.resolve_symbol("XAUUSD.c", DEST)
+def test_an_explicit_mapping_is_trusted_over_the_cached_symbol_list():
+    """The cached list is not authoritative; the terminal is.
+
+    A terminal that has just started reports only the symbols it has pulled in
+    so far — Wyncrest listed 64 of its 71, with the crypto missing. Refusing a
+    mapping because of that would reject trades the destination can take, so an
+    explicit mapping is passed through and the terminal gets the final say.
+    """
+    rules = CopyRules(symbol_map={"BTCUSD.c": "BTCUSD.s"})
+    assert rules.resolve_symbol("BTCUSD.c", DEST) == "BTCUSD.s"
 
 
 def test_allow_and_deny_lists_use_base_names():

@@ -106,15 +106,19 @@ class CopyRules:
         Order: explicit map, exact name, then base-name match preferring the
         configured suffix. Raises RuleError rather than guessing when a base
         name is ambiguous, so we never trade the wrong instrument.
+
+        An explicit mapping is returned as written, without checking it against
+        ``index``. That list comes from the terminal's local symbol cache, which
+        is incomplete for a while after a terminal first starts and does not
+        include instruments it has not pulled in yet. The terminal itself is the
+        authority: the caller looks the symbol up there next, which selects it
+        in Market Watch and fails with a clear error if it genuinely does not
+        exist. Rejecting a mapping on the strength of a stale cache would refuse
+        trades the destination can perfectly well take.
         """
         mapped = self.symbol_map.get(master_symbol.upper())
         if mapped:
-            found = index.exact(mapped)
-            if not found:
-                raise RuleError(
-                    f"{master_symbol} is mapped to {mapped}, which the destination does not offer"
-                )
-            return found
+            return index.exact(mapped) or mapped
 
         exact = index.exact(master_symbol)
         if exact:

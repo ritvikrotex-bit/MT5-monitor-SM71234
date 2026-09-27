@@ -162,6 +162,24 @@ def symbols(account_id: str, q: str = "") -> dict[str, Any]:
     return {"symbols": sorted(names), "total": len(names)}
 
 
+@app.get("/v1/accounts/{account_id}/symbols/{symbol}", dependencies=[Depends(require_secret)])
+def symbol_spec(account_id: str, symbol: str) -> dict[str, Any]:
+    """Ask the terminal about one symbol directly.
+
+    This is authoritative where the cached symbol list is not: it selects the
+    symbol in Market Watch first, so it finds instruments the broker offers but
+    the terminal had not pulled into its local list yet.
+    """
+    try:
+        return pool.get(account_id).call(
+            "spec", {"symbol": symbol}, timeout=settings.snapshot_timeout
+        )
+    except WorkerDown as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CommandFailed as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/v1/links/{link_id}/arm", dependencies=[Depends(require_secret)])
 def arm(link_id: str) -> dict[str, Any]:
     """Clear a halt so a stopped link can run again."""

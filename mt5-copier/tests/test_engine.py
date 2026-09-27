@@ -524,3 +524,75 @@ def test_arming_keeps_managing_positions_the_link_still_owns(setup):
     del master.positions[master_ticket]
     engine.run_link(link)
     assert dest.positions == {}, "the copy was not closed with its master"
+
+
+# -- stale symbol lists ----------------------------------------------------
+
+def test_a_stale_symbol_list_is_refreshed_before_giving_up(setup):
+    """A symbol missing from the cache must not be declared unavailable.
+
+    The terminal's list fills in over the first minutes after it starts. The
+    engine re-reads it once before reporting that an instrument cannot be
+    copied.
+    """
+    master, dest, engine, state, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+
+    # the destination can trade it, but its cached list has not caught up
+    dest.symbols = ["XAUUSD.s", "EURUSD.s"]
+    engine.run_link(link)
+    master.add("BTCUSD.c", "BUY", 0.10)
+    dest.symbols = ["XAUUSD.s", "EURUSD.s", "BTCUSD.s"]  # the list catches up
+
+    engine.run_link(link)
+    assert len(dest.positions) == 1, "gave up on a symbol the destination offers"
+    assert next(iter(dest.positions.values()))["symbol"] == "BTCUSD.s"
+
+
+def test_a_genuinely_missing_symbol_is_still_skipped(setup):
+    master, dest, engine, state, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+    master.add("BTCUSD.c", "BUY", 0.10)
+    engine.run_link(link)
+    assert dest.positions == {}
+    assert any(e["kind"] == "skipped" for e in engine.events())
+
+
+def test_the_same_skip_is_not_reported_on_every_retry(setup):
+    """Backoff retries must not bury everything else in the activity log."""
+    master, dest, engine, store, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+    master.add("BTCUSD.c", "BUY", 0.10)
+    link_state = store.get("L1")
+
+    for _ in range(6):
+        for failure in link_state.failures.values():
+            failure["nextTry"] = 0  # pretend the backoff elapsed
+        engine.run_link(link)
+
+    skips = [e for e in engine.events() if e["kind"] == "skipped"]
+    assert len(skips) == 1, f"reported the same skip {len(skips)} times"
+
+
+def test_a_changed_reason_is_reported_again(setup):
+    master, dest, engine, store, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+    master.add("BTCUSD.c", "BUY", 0.10)
+    engine.run_link(link)
+    assert len([e for e in engine.events() if e["kind"] == "skipped"]) == 1
+
+    # it now resolves, but the scaled lot is too small to place
+    dest.symbols = ["XAUUSD.s", "EURUSD.s", "BTCUSD.s"]
+    link.rules.lot_mode = "MULTIPLIER"
+    link.rules.lot_value = 0.001
+    for failure in store.get("L1").failures.values():
+        failure["nextTry"] = 0
+    engine.run_link(link)
+
+    skips = [e for e in engine.events() if e["kind"] == "skipped"]
+    assert len(skips) == 2, "a different reason should be reported"
+    assert "minimum" in skips[0]["message"]
