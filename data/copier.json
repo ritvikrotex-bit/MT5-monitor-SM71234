@@ -33,7 +33,7 @@
         "autoMatch": true,
         "allowSymbols": [],
         "denySymbols": [],
-        "lotMode": "BALANCE",
+        "lotMode": "EQUITY",
         "lotValue": 1,
         "maxLot": 0,
         "minVolumeAction": "MIN",
@@ -47,7 +47,7 @@
       "dryRun": false,
       "maxDrawdownPct": 10,
       "createdAt": "2026-09-26T20:06:50.331Z",
-      "updatedAt": "2026-09-27T16:34:24.285Z"
+      "updatedAt": "2026-09-27T17:50:45.915Z"
     }
   ]
 }

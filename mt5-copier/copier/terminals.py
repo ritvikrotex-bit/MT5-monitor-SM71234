@@ -19,6 +19,7 @@ from ~381 MB down to ~230 MB.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -59,26 +60,51 @@ def find_source_install() -> Path:
     )
 
 
+def _terminal_data_roots() -> list[Path]:
+    r"""Every place an MT5 data folder might live, most specific first.
+
+    As a Windows service the copier runs as LocalSystem, whose home is
+    C:\Windows\System32\config\systemprofile. The terminal that knows the
+    broker server names was set up by a person, so its data folder sits under
+    that person's profile instead. Looking only at our own home would find
+    nothing on the server and leave every named server unreachable.
+    """
+    roots: list[Path] = []
+    override = os.environ.get("MT5_DATA_DIR")
+    if override:
+        roots.append(Path(override))
+    roots.append(Path.home() / "AppData" / "Roaming" / "MetaQuotes" / "Terminal")
+    users = Path(os.environ.get("SystemDrive", "C:") + "\\") / "Users"
+    if users.is_dir():
+        for profile in users.iterdir():
+            roots.append(profile / "AppData" / "Roaming" / "MetaQuotes" / "Terminal")
+    return roots
+
+
 def find_source_data_dir(install: Path) -> Path | None:
-    """Best-effort: the AppData data folder of the reference install.
+    r"""Best-effort: the most recently used MT5 data folder on this machine.
 
     Used only to borrow ``servers.dat``. Returns None when it cannot be found,
     in which case accounts must be configured with an IP:port server address.
+    Set MT5_DATA_DIR to point at a specific ``...\MetaQuotes\Terminal`` folder.
     """
-    root = Path.home() / "AppData" / "Roaming" / "MetaQuotes" / "Terminal"
-    if not root.is_dir():
-        return None
     best: tuple[float, Path] | None = None
-    for child in root.iterdir():
-        # Data folders are named with a 32-char hex hash of the install path.
-        if not child.is_dir() or len(child.name) != 32:
-            continue
-        servers = child / "config" / "servers.dat"
-        if not servers.is_file():
-            continue
-        stamp = servers.stat().st_mtime
-        if best is None or stamp > best[0]:
-            best = (stamp, child)
+    for root in _terminal_data_roots():
+        try:
+            children = list(root.iterdir()) if root.is_dir() else []
+        except OSError:
+            continue  # another user's profile we are not allowed to read
+        for child in children:
+            # Data folders are named with a 32-char hex hash of the install path.
+            if not child.is_dir() or len(child.name) != 32:
+                continue
+            servers = child / "config" / "servers.dat"
+            try:
+                stamp = servers.stat().st_mtime
+            except OSError:
+                continue
+            if best is None or stamp > best[0]:
+                best = (stamp, child)
     return best[1] if best else None
 
 

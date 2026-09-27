@@ -53,3 +53,6 @@ mt5-copier/.env
 
 # Portable MT5 terminals must never live inside the repository
 mt5-terminals/
+
+# Per-machine runtime state: where Telegram delivery has got to
+data/copier-alert-cursor.json
