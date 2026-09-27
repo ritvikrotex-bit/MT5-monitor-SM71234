@@ -19,10 +19,10 @@
       "server": "31.14.254.192:443",
       "managerLogin": "1021",
       "encryptedPassword": "4594a8541732c83ca55792f1:5d441b3c7398c512d7135c89aeaddaed:8b83e03d02c28473",
-      "status": "DISCONNECTED",
-      "statusMessage": "Saved. Test the connection to open a Manager session.",
+      "status": "CONNECTED",
+      "statusMessage": "Connected to 31.14.254.192:443 as 1021",
       "createdAt": "2026-09-26T20:06:50.331Z",
-      "updatedAt": "2026-09-26T20:06:50.331Z"
+      "updatedAt": "2026-09-27T04:30:37.290Z"
     }
   ]
 }

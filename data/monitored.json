@@ -20,6 +20,13 @@
       "brokerId": "2637a45e-beb4-4b94-8825-b3cebd7cec25",
       "login": 100003,
       "addedAt": "2026-09-26T20:06:50.331Z"
+    },
+    {
+      "userId": "user-7a7b5ce3",
+      "brokerId": "2637a45e-beb4-4b94-8825-b3cebd7cec25",
+      "login": 10003,
+      "clientName": "Login 10003",
+      "createdAt": "2026-09-27T04:31:16.579Z"
     }
   ]
 }

@@ -55,6 +55,7 @@ import { Route as ApiAdminUsersIdStatusRouteImport } from './routes/api/admin/us
 import { Route as ApiBrokersIdClientsLoginRouteImport } from './routes/api/brokers.$id.clients.$login'
 import { Route as ApiBrokersIdClientsSearchRouteImport } from './routes/api/brokers.$id.clients.search'
 import { Route as ApiCopierAccountsIdProbeRouteImport } from './routes/api/copier.accounts.$id.probe'
+import { Route as ApiCopierAccountsIdSymbolsRouteImport } from './routes/api/copier.accounts.$id.symbols'
 import { Route as ApiCopierLinksIdArmRouteImport } from './routes/api/copier.links.$id.arm'
 import { Route as ApiCopierLinksIdFlattenRouteImport } from './routes/api/copier.links.$id.flatten'
 import { Route as ApiBrokersIdClientsLoginPositionsRouteImport } from './routes/api/brokers.$id.clients.$login.positions'
@@ -295,6 +296,12 @@ const ApiCopierAccountsIdProbeRoute =
     path: '/probe',
     getParentRoute: () => ApiCopierAccountsIdRoute,
   } as any)
+const ApiCopierAccountsIdSymbolsRoute =
+  ApiCopierAccountsIdSymbolsRouteImport.update({
+    id: '/symbols',
+    path: '/symbols',
+    getParentRoute: () => ApiCopierAccountsIdRoute,
+  } as any)
 const ApiCopierLinksIdArmRoute = ApiCopierLinksIdArmRouteImport.update({
   id: '/arm',
   path: '/arm',
@@ -359,6 +366,7 @@ export interface FileRoutesByFullPath {
   '/api/brokers/$id/clients/$login': typeof ApiBrokersIdClientsLoginRouteWithChildren
   '/api/brokers/$id/clients/search': typeof ApiBrokersIdClientsSearchRoute
   '/api/copier/accounts/$id/probe': typeof ApiCopierAccountsIdProbeRoute
+  '/api/copier/accounts/$id/symbols': typeof ApiCopierAccountsIdSymbolsRoute
   '/api/copier/links/$id/arm': typeof ApiCopierLinksIdArmRoute
   '/api/copier/links/$id/flatten': typeof ApiCopierLinksIdFlattenRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
@@ -410,6 +418,7 @@ export interface FileRoutesByTo {
   '/api/brokers/$id/clients/$login': typeof ApiBrokersIdClientsLoginRouteWithChildren
   '/api/brokers/$id/clients/search': typeof ApiBrokersIdClientsSearchRoute
   '/api/copier/accounts/$id/probe': typeof ApiCopierAccountsIdProbeRoute
+  '/api/copier/accounts/$id/symbols': typeof ApiCopierAccountsIdSymbolsRoute
   '/api/copier/links/$id/arm': typeof ApiCopierLinksIdArmRoute
   '/api/copier/links/$id/flatten': typeof ApiCopierLinksIdFlattenRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
@@ -462,6 +471,7 @@ export interface FileRoutesById {
   '/api/brokers/$id/clients/$login': typeof ApiBrokersIdClientsLoginRouteWithChildren
   '/api/brokers/$id/clients/search': typeof ApiBrokersIdClientsSearchRoute
   '/api/copier/accounts/$id/probe': typeof ApiCopierAccountsIdProbeRoute
+  '/api/copier/accounts/$id/symbols': typeof ApiCopierAccountsIdSymbolsRoute
   '/api/copier/links/$id/arm': typeof ApiCopierLinksIdArmRoute
   '/api/copier/links/$id/flatten': typeof ApiCopierLinksIdFlattenRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
@@ -515,6 +525,7 @@ export interface FileRouteTypes {
     | '/api/brokers/$id/clients/$login'
     | '/api/brokers/$id/clients/search'
     | '/api/copier/accounts/$id/probe'
+    | '/api/copier/accounts/$id/symbols'
     | '/api/copier/links/$id/arm'
     | '/api/copier/links/$id/flatten'
     | '/api/brokers/$id/clients/$login/positions'
@@ -566,6 +577,7 @@ export interface FileRouteTypes {
     | '/api/brokers/$id/clients/$login'
     | '/api/brokers/$id/clients/search'
     | '/api/copier/accounts/$id/probe'
+    | '/api/copier/accounts/$id/symbols'
     | '/api/copier/links/$id/arm'
     | '/api/copier/links/$id/flatten'
     | '/api/brokers/$id/clients/$login/positions'
@@ -617,6 +629,7 @@ export interface FileRouteTypes {
     | '/api/brokers/$id/clients/$login'
     | '/api/brokers/$id/clients/search'
     | '/api/copier/accounts/$id/probe'
+    | '/api/copier/accounts/$id/symbols'
     | '/api/copier/links/$id/arm'
     | '/api/copier/links/$id/flatten'
     | '/api/brokers/$id/clients/$login/positions'
@@ -980,6 +993,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCopierAccountsIdProbeRouteImport
       parentRoute: typeof ApiCopierAccountsIdRoute
     }
+    '/api/copier/accounts/$id/symbols': {
+      id: '/api/copier/accounts/$id/symbols'
+      path: '/symbols'
+      fullPath: '/api/copier/accounts/$id/symbols'
+      preLoaderRoute: typeof ApiCopierAccountsIdSymbolsRouteImport
+      parentRoute: typeof ApiCopierAccountsIdRoute
+    }
     '/api/copier/links/$id/arm': {
       id: '/api/copier/links/$id/arm'
       path: '/arm'
@@ -1051,10 +1071,12 @@ const ApiBrokersRouteWithChildren = ApiBrokersRoute._addFileChildren(
 
 interface ApiCopierAccountsIdRouteChildren {
   ApiCopierAccountsIdProbeRoute: typeof ApiCopierAccountsIdProbeRoute
+  ApiCopierAccountsIdSymbolsRoute: typeof ApiCopierAccountsIdSymbolsRoute
 }
 
 const ApiCopierAccountsIdRouteChildren: ApiCopierAccountsIdRouteChildren = {
   ApiCopierAccountsIdProbeRoute: ApiCopierAccountsIdProbeRoute,
+  ApiCopierAccountsIdSymbolsRoute: ApiCopierAccountsIdSymbolsRoute,
 }
 
 const ApiCopierAccountsIdRouteWithChildren =

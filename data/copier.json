@@ -25,10 +25,14 @@
       },
       "destAccountId": "f19e423e-586f-454d-ac9f-eb39cb04af47",
       "rules": {
-        "symbolMap": {},
+        "symbolMap": {
+          "XAUUSD.c": "XAUUSD.s"
+        },
         "symbolSuffix": ".s",
         "allowSymbols": [],
-        "denySymbols": [],
+        "denySymbols": [
+          "BTCUSD"
+        ],
         "lotMode": "FIXED",
         "lotValue": 0.01,
         "maxLot": 0.01,
@@ -40,10 +44,10 @@
         "maxSlippagePoints": 20
       },
       "enabled": true,
-      "dryRun": true,
+      "dryRun": false,
       "maxDrawdownPct": 10,
       "createdAt": "2026-09-26T20:06:50.331Z",
-      "updatedAt": "2026-09-26T20:23:38.617Z"
+      "updatedAt": "2026-09-27T04:50:09.130Z"
     }
   ]
 }

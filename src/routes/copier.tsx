@@ -3,11 +3,13 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
+  ChevronDown,
   Pause,
   Play,
   Plus,
   RefreshCw,
   Server,
+  Settings2,
   ShieldAlert,
   Trash2,
   X,
@@ -136,6 +138,7 @@ function CopierPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [addingAccount, setAddingAccount] = useState(false);
   const [addingLink, setAddingLink] = useState(false);
+  const [editingLink, setEditingLink] = useState<string | null>(null);
   const [probe, setProbe] = useState<Record<string, Snapshot | string>>({});
 
   const load = useCallback(async () => {
@@ -292,6 +295,23 @@ function CopierPage() {
                 dest={accountById(link.destAccountId)}
                 busy={busy}
                 onAction={run}
+                editing={editingLink === link.id}
+                onToggleEdit={() =>
+                  setEditingLink((current) => (current === link.id ? null : link.id))
+                }
+                onSaveEdit={(body) =>
+                  run(
+                    `link-${link.id}`,
+                    async () => {
+                      await api(`/api/copier/links/${link.id}`, {
+                        method: "PATCH",
+                        body: JSON.stringify(body),
+                      });
+                      setEditingLink(null);
+                    },
+                    "Link updated.",
+                  )
+                }
               />
             ))}
           </div>
@@ -544,12 +564,18 @@ function LinkRow({
   dest,
   busy,
   onAction,
+  editing,
+  onToggleEdit,
+  onSaveEdit,
 }: {
   link: CopyLink;
   masterLabel: string;
   dest: Account | undefined;
   busy: string | null;
   onAction: (key: string, fn: () => Promise<unknown>, done?: string) => Promise<void>;
+  editing: boolean;
+  onToggleEdit: () => void;
+  onSaveEdit: (body: Record<string, unknown>) => void;
 }) {
   const halted = link.status?.state.haltedReason ?? null;
   const cycleError = link.status?.cycle.error ?? null;
@@ -607,6 +633,19 @@ function LinkRow({
         </div>
 
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <button
+            onClick={onToggleEdit}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium whitespace-nowrap",
+              editing
+                ? "border-primary/50 bg-primary/10 text-primary"
+                : "border-border hover:bg-secondary",
+            )}
+            aria-expanded={editing}
+          >
+            <Settings2 className="size-3.5" />
+            Edit
+          </button>
           <button
             onClick={() => void patch({ enabled: !link.enabled })}
             disabled={busy === `link-${link.id}`}
@@ -695,6 +734,15 @@ function LinkRow({
         <p className="mt-2 rounded-lg bg-amber-500/10 p-2 text-[11px] break-words text-amber-600 dark:text-amber-400">
           {cycleError}
         </p>
+      )}
+      {editing && (
+        <EditLinkForm
+          link={link}
+          destAccountId={dest?.id}
+          busy={busy === `link-${link.id}`}
+          onCancel={onToggleEdit}
+          onSave={onSaveEdit}
+        />
       )}
       {link.status && (
         <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
@@ -836,204 +884,114 @@ function AccountForm({
   );
 }
 
-function LinkForm({
-  accounts,
-  brokers,
-  onSave,
-  onCancel,
-  busy,
-}: {
-  accounts: Account[];
-  brokers: Broker[];
-  onSave: (body: Record<string, unknown>) => void;
-  onCancel: () => void;
-  busy: boolean;
-}) {
-  const destinations = accounts.filter((a) => a.role !== "MASTER");
-  const terminalMasters = accounts.filter((a) => a.role !== "DESTINATION");
-  const [form, setForm] = useState({
-    label: "",
-    masterKind: "MANAGER" as Master["kind"],
-    masterBrokerId: brokers[0]?.id ?? "",
-    masterLogin: "",
-    masterAccountId: terminalMasters[0]?.id ?? "",
-    destAccountId: destinations[0]?.id ?? "",
-    lotMode: "BALANCE" as Rules["lotMode"],
-    lotValue: "1",
-    maxLot: "0",
-    minVolumeAction: "SKIP" as Rules["minVolumeAction"],
-    symbolSuffix: "",
-    symbolMap: "",
-    allowSymbols: "",
-    denySymbols: "",
-    maxOpenPositions: "0",
-    maxSlippagePoints: "20",
-    maxDrawdownPct: "0",
-    reverse: false,
-    copySlTp: true,
-    copyExisting: false,
-  });
-  const [mapError, setMapError] = useState<string | null>(null);
-  const set =
-    (key: keyof typeof form) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-      setForm((f) => ({ ...f, [key]: e.target.value }));
-  const toggle = (key: keyof typeof form) => (value: boolean) =>
-    setForm((f) => ({ ...f, [key]: value }));
+// ---------------------------------------------------------------------------
+// Rules, shared by the create and edit forms so the two cannot drift apart.
+// ---------------------------------------------------------------------------
 
-  const parseList = (raw: string) =>
-    raw
-      .split(/[\n,]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+type RulesForm = {
+  lotMode: Rules["lotMode"];
+  lotValue: string;
+  maxLot: string;
+  minVolumeAction: Rules["minVolumeAction"];
+  symbolSuffix: string;
+  symbolMap: string;
+  allowSymbols: string;
+  denySymbols: string;
+  maxOpenPositions: string;
+  maxSlippagePoints: string;
+  maxDrawdownPct: string;
+  reverse: boolean;
+  copySlTp: boolean;
+  copyExisting: boolean;
+};
 
-  /** "XAUUSD.c = XAUUSD.s" per line, or comma separated. */
-  const parseMap = (raw: string): Record<string, string> => {
-    const out: Record<string, string> = {};
-    for (const line of parseList(raw)) {
-      const [from, to] = line.split(/[=>:]+/).map((s) => s.trim());
-      if (!from || !to) throw new Error(`"${line}" should look like XAUUSD.c = XAUUSD.s`);
-      out[from] = to;
-    }
-    return out;
+function rulesDefaults(link?: CopyLink): RulesForm {
+  const r = link?.rules;
+  return {
+    lotMode: r?.lotMode ?? "BALANCE",
+    lotValue: String(r?.lotValue ?? 1),
+    maxLot: String(r?.maxLot ?? 0),
+    minVolumeAction: r?.minVolumeAction ?? "SKIP",
+    symbolSuffix: r?.symbolSuffix ?? "",
+    symbolMap: Object.entries(r?.symbolMap ?? {})
+      .map(([from, to]) => `${from} = ${to}`)
+      .join("\n"),
+    allowSymbols: (r?.allowSymbols ?? []).join(", "),
+    denySymbols: (r?.denySymbols ?? []).join(", "),
+    maxOpenPositions: String(r?.maxOpenPositions ?? 0),
+    maxSlippagePoints: String(r?.maxSlippagePoints ?? 20),
+    maxDrawdownPct: String(link?.maxDrawdownPct ?? 0),
+    reverse: r?.reverse ?? false,
+    copySlTp: r?.copySlTp ?? true,
+    copyExisting: r?.copyExisting ?? false,
   };
+}
 
+const parseList = (raw: string) =>
+  raw
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+/** "XAUUSD.c = XAUUSD.s" per line, or comma separated. */
+function parseSymbolMap(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of parseList(raw)) {
+    const [from, to] = line.split(/[=>:]+/).map((s) => s.trim());
+    if (!from || !to) throw new Error(`"${line}" should look like XAUUSD.c = XAUUSD.s`);
+    out[from] = to;
+  }
+  return out;
+}
+
+function rulesPayload(form: RulesForm) {
+  return {
+    maxDrawdownPct: Number(form.maxDrawdownPct),
+    rules: {
+      lotMode: form.lotMode,
+      lotValue: Number(form.lotValue),
+      maxLot: Number(form.maxLot),
+      minVolumeAction: form.minVolumeAction,
+      symbolSuffix: form.symbolSuffix,
+      symbolMap: parseSymbolMap(form.symbolMap),
+      allowSymbols: parseList(form.allowSymbols),
+      denySymbols: parseList(form.denySymbols),
+      maxOpenPositions: Number(form.maxOpenPositions),
+      maxSlippagePoints: Number(form.maxSlippagePoints),
+      reverse: form.reverse,
+      copySlTp: form.copySlTp,
+      copyExisting: form.copyExisting,
+    },
+  };
+}
+
+type FieldSetter = (
+  key: keyof RulesForm,
+) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => void;
+
+function useRulesForm(link?: CopyLink) {
+  const [form, setForm] = useState<RulesForm>(() => rulesDefaults(link));
+  const set: FieldSetter = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+  const toggle = (key: keyof RulesForm) => (value: boolean) =>
+    setForm((f) => ({ ...f, [key]: value }));
+  return { form, set, toggle };
+}
+
+function RulesFields({
+  form,
+  set,
+  toggle,
+  mapError,
+  destAccountId,
+}: {
+  form: RulesForm;
+  set: FieldSetter;
+  toggle: (key: keyof RulesForm) => (value: boolean) => void;
+  mapError: string | null;
+  destAccountId: string | undefined;
+}) {
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        let symbolMap: Record<string, string>;
-        try {
-          symbolMap = parseMap(form.symbolMap);
-          setMapError(null);
-        } catch (err) {
-          setMapError(err instanceof Error ? err.message : "Check the symbol mappings.");
-          return;
-        }
-        onSave({
-          label: form.label,
-          master:
-            form.masterKind === "MANAGER"
-              ? { kind: "MANAGER", brokerId: form.masterBrokerId, login: Number(form.masterLogin) }
-              : { kind: "TERMINAL", accountId: form.masterAccountId },
-          destAccountId: form.destAccountId,
-          maxDrawdownPct: Number(form.maxDrawdownPct),
-          rules: {
-            lotMode: form.lotMode,
-            lotValue: Number(form.lotValue),
-            maxLot: Number(form.maxLot),
-            minVolumeAction: form.minVolumeAction,
-            symbolSuffix: form.symbolSuffix,
-            symbolMap,
-            allowSymbols: parseList(form.allowSymbols),
-            denySymbols: parseList(form.denySymbols),
-            maxOpenPositions: Number(form.maxOpenPositions),
-            maxSlippagePoints: Number(form.maxSlippagePoints),
-            reverse: form.reverse,
-            copySlTp: form.copySlTp,
-            copyExisting: form.copyExisting,
-          },
-        });
-      }}
-      className="mt-3 space-y-4 rounded-xl border border-primary/30 bg-primary/5 p-3 sm:p-4"
-    >
-      <Field label="Label">
-        <input
-          required
-          className={inputClass}
-          value={form.label}
-          onChange={set("label")}
-          placeholder="TDFX 100003 to Wyncrest 910102"
-        />
-      </Field>
-
-      {/* ---- master */}
-      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
-        <legend className="px-1 text-xs font-semibold">
-          Master — where trades are copied from
-        </legend>
-        <Field
-          label="Read the master"
-          hint="Through a broker's Manager connection is the normal choice: no password for that account, and nothing can trade on it."
-        >
-          <select className={inputClass} value={form.masterKind} onChange={set("masterKind")}>
-            <option value="MANAGER">From the Manager connection (recommended)</option>
-            <option value="TERMINAL">By logging in to the account on its MT5 server</option>
-          </select>
-        </Field>
-        {form.masterKind === "MANAGER" ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Broker" hint="Whose Manager connection can see the master.">
-              <select
-                required
-                className={inputClass}
-                value={form.masterBrokerId}
-                onChange={set("masterBrokerId")}
-              >
-                <option value="">Choose a broker</option>
-                {brokers.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name} ({b.server})
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Master's MT5 login" hint="Read only. No password for it is needed.">
-              <input
-                required
-                type="number"
-                className={inputClass}
-                value={form.masterLogin}
-                onChange={set("masterLogin")}
-                placeholder="100003"
-              />
-            </Field>
-          </div>
-        ) : (
-          <Field
-            label="Master account"
-            hint="An account added below. Its investor password is enough."
-          >
-            <select
-              required
-              className={inputClass}
-              value={form.masterAccountId}
-              onChange={set("masterAccountId")}
-            >
-              <option value="">Choose an account</option>
-              {terminalMasters.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.label} ({a.login})
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
-      </fieldset>
-
-      {/* ---- destination */}
-      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
-        <legend className="px-1 text-xs font-semibold">
-          Destination — where trades are copied to
-        </legend>
-        <Field label="Account" hint="Needs its MT5 trading password, on a hedging account.">
-          <select
-            required
-            className={inputClass}
-            value={form.destAccountId}
-            onChange={set("destAccountId")}
-          >
-            <option value="">Choose an account</option>
-            {destinations.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.label} ({a.server} · {a.login})
-              </option>
-            ))}
-          </select>
-        </Field>
-      </fieldset>
-
-      {/* ---- sizing */}
+    <>
       <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
         <legend className="px-1 text-xs font-semibold">Lot sizing</legend>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -1084,11 +1042,11 @@ function LinkForm({
           </Field>
         </div>
         <p className="text-[11px] break-words text-muted-foreground">
-          Lots always round down to the symbol's step, so rounding never increases your exposure.
+          Lots always round down to the symbol&apos;s step, so rounding never increases your
+          exposure.
         </p>
       </fieldset>
 
-      {/* ---- symbols */}
       <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
         <legend className="px-1 text-xs font-semibold">Symbol translation</legend>
         <p className="text-[11px] break-words text-muted-foreground">
@@ -1133,9 +1091,9 @@ function LinkForm({
           </Field>
         </div>
         {mapError && <p className="text-[11px] break-words text-destructive">{mapError}</p>}
+        {destAccountId && <SymbolBrowser accountId={destAccountId} />}
       </fieldset>
 
-      {/* ---- limits and behaviour */}
       <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
         <legend className="px-1 text-xs font-semibold">Limits and behaviour</legend>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -1192,6 +1150,306 @@ function LinkForm({
           />
         </div>
       </fieldset>
+    </>
+  );
+}
+
+/** What the destination broker actually offers, so a mapping can be checked
+ *  against reality instead of guessed at. */
+function SymbolBrowser({ accountId }: { accountId: string }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [symbols, setSymbols] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+
+  useEffect(() => {
+    if (!open || symbols.length || loading) return;
+    setLoading(true);
+    setError(null);
+    api<{ symbols: string[] }>(`/api/copier/accounts/${accountId}/symbols`)
+      .then((d) => setSymbols(d.symbols))
+      .catch((e) => setError(e instanceof Error ? e.message : "Could not list symbols."))
+      .finally(() => setLoading(false));
+  }, [open, accountId, symbols.length, loading]);
+
+  const shown = filter
+    ? symbols.filter((s) => s.toUpperCase().includes(filter.toUpperCase()))
+    : symbols;
+
+  return (
+    <div className="rounded-lg border border-border/70 bg-background/40 p-2.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 text-[11px] font-medium"
+      >
+        <span>Symbols this destination offers</span>
+        <ChevronDown
+          className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          {loading && <p className="text-[11px] text-muted-foreground">Loading...</p>}
+          {error && (
+            <p className="text-[11px] break-words text-destructive">
+              {error} The destination terminal has to be running to list its symbols.
+            </p>
+          )}
+          {symbols.length > 0 && (
+            <>
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter, e.g. XAU"
+                className={inputClass}
+              />
+              <p className="text-[11px] break-words text-muted-foreground">
+                {shown.length} of {symbols.length}
+                {filter && shown.length === 0
+                  ? " — nothing matches, so this instrument cannot be copied here"
+                  : ""}
+              </p>
+              <div className="flex max-h-40 flex-wrap gap-1 overflow-y-auto">
+                {shown.map((s) => (
+                  <span
+                    key={s}
+                    className="num rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                  >
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EditLinkForm({
+  link,
+  destAccountId,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  link: CopyLink;
+  destAccountId: string | undefined;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (body: Record<string, unknown>) => void;
+}) {
+  const { form, set, toggle } = useRulesForm(link);
+  const [label, setLabel] = useState(link.label);
+  const [mapError, setMapError] = useState<string | null>(null);
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        let payload;
+        try {
+          payload = rulesPayload(form);
+          setMapError(null);
+        } catch (err) {
+          setMapError(err instanceof Error ? err.message : "Check the symbol mappings.");
+          return;
+        }
+        onSave({ label, ...payload });
+      }}
+      className="mt-3 space-y-4 rounded-xl border border-primary/30 bg-primary/5 p-3 sm:p-4"
+    >
+      <p className="text-[11px] break-words text-muted-foreground">
+        The master and the destination cannot be changed here — that would be a different link.
+        Create a new one for a different pair.
+      </p>
+      <Field label="Label">
+        <input
+          required
+          className={inputClass}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+        />
+      </Field>
+      <RulesFields
+        form={form}
+        set={set}
+        toggle={toggle}
+        mapError={mapError}
+        destAccountId={destAccountId}
+      />
+      {link.enabled && !link.dryRun && (
+        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] break-words text-amber-600 dark:text-amber-400">
+          This link is live. New rules apply to trades from the moment you save; copies already open
+          keep the size they were opened at.
+        </p>
+      )}
+      <FormButtons busy={busy} onCancel={onCancel} submitLabel="Save changes" />
+    </form>
+  );
+}
+
+function LinkForm({
+  accounts,
+  brokers,
+  onSave,
+  onCancel,
+  busy,
+}: {
+  accounts: Account[];
+  brokers: Broker[];
+  onSave: (body: Record<string, unknown>) => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  const destinations = accounts.filter((a) => a.role !== "MASTER");
+  const terminalMasters = accounts.filter((a) => a.role !== "DESTINATION");
+  const { form, set, toggle } = useRulesForm();
+  const [head, setHead] = useState({
+    label: "",
+    masterKind: "MANAGER" as Master["kind"],
+    masterBrokerId: brokers[0]?.id ?? "",
+    masterLogin: "",
+    masterAccountId: terminalMasters[0]?.id ?? "",
+    destAccountId: destinations[0]?.id ?? "",
+  });
+  const [mapError, setMapError] = useState<string | null>(null);
+  const setHeadField =
+    (key: keyof typeof head) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setHead((f) => ({ ...f, [key]: e.target.value }));
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        let payload;
+        try {
+          payload = rulesPayload(form);
+          setMapError(null);
+        } catch (err) {
+          setMapError(err instanceof Error ? err.message : "Check the symbol mappings.");
+          return;
+        }
+        onSave({
+          label: head.label,
+          master:
+            head.masterKind === "MANAGER"
+              ? { kind: "MANAGER", brokerId: head.masterBrokerId, login: Number(head.masterLogin) }
+              : { kind: "TERMINAL", accountId: head.masterAccountId },
+          destAccountId: head.destAccountId,
+          ...payload,
+        });
+      }}
+      className="mt-3 space-y-4 rounded-xl border border-primary/30 bg-primary/5 p-3 sm:p-4"
+    >
+      <Field label="Label">
+        <input
+          required
+          className={inputClass}
+          value={head.label}
+          onChange={setHeadField("label")}
+          placeholder="TDFX 100003 to Wyncrest 910102"
+        />
+      </Field>
+
+      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
+        <legend className="px-1 text-xs font-semibold">
+          Master — where trades are copied from
+        </legend>
+        <Field
+          label="Read the master"
+          hint="Through a broker's Manager connection is the normal choice: no password for that account, and nothing can trade on it."
+        >
+          <select
+            className={inputClass}
+            value={head.masterKind}
+            onChange={setHeadField("masterKind")}
+          >
+            <option value="MANAGER">From the Manager connection (recommended)</option>
+            <option value="TERMINAL">By logging in to the account on its MT5 server</option>
+          </select>
+        </Field>
+        {head.masterKind === "MANAGER" ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Broker" hint="Whose Manager connection can see the master.">
+              <select
+                required
+                className={inputClass}
+                value={head.masterBrokerId}
+                onChange={setHeadField("masterBrokerId")}
+              >
+                <option value="">Choose a broker</option>
+                {brokers.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} ({b.server})
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Master's MT5 login" hint="Read only. No password for it is needed.">
+              <input
+                required
+                type="number"
+                className={inputClass}
+                value={head.masterLogin}
+                onChange={setHeadField("masterLogin")}
+                placeholder="100003"
+              />
+            </Field>
+          </div>
+        ) : (
+          <Field
+            label="Master account"
+            hint="An account added below. Its investor password is enough."
+          >
+            <select
+              required
+              className={inputClass}
+              value={head.masterAccountId}
+              onChange={setHeadField("masterAccountId")}
+            >
+              <option value="">Choose an account</option>
+              {terminalMasters.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label} ({a.login})
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+      </fieldset>
+
+      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
+        <legend className="px-1 text-xs font-semibold">
+          Destination — where trades are copied to
+        </legend>
+        <Field label="Account" hint="Needs its MT5 trading password, on a hedging account.">
+          <select
+            required
+            className={inputClass}
+            value={head.destAccountId}
+            onChange={setHeadField("destAccountId")}
+          >
+            <option value="">Choose an account</option>
+            {destinations.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.label} ({a.server} · {a.login})
+              </option>
+            ))}
+          </select>
+        </Field>
+      </fieldset>
+
+      <RulesFields
+        form={form}
+        set={set}
+        toggle={toggle}
+        mapError={mapError}
+        destAccountId={head.destAccountId || undefined}
+      />
 
       <FormButtons busy={busy} onCancel={onCancel} submitLabel="Create link" />
       <p className="text-[11px] break-words text-muted-foreground">

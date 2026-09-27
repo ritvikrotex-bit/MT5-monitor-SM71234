@@ -161,6 +161,14 @@ export async function probeCopierAccount(accountId: string): Promise<CopierAccou
   return call<CopierAccountSnapshot>(`/v1/accounts/${accountId}/probe`, { method: "POST" });
 }
 
+export async function copierAccountSymbols(
+  accountId: string,
+  query = "",
+): Promise<{ symbols: string[]; total: number }> {
+  const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
+  return call(`/v1/accounts/${accountId}/symbols${suffix}`, { method: "GET" });
+}
+
 export async function armCopierLink(linkId: string): Promise<{ ok: boolean }> {
   return call(`/v1/links/${linkId}/arm`, { method: "POST" });
 }

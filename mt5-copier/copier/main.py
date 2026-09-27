@@ -145,6 +145,23 @@ def probe(account_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.get("/v1/accounts/{account_id}/symbols", dependencies=[Depends(require_secret)])
+def symbols(account_id: str, q: str = "") -> dict[str, Any]:
+    """List the symbols this account can trade, so a mapping can be checked
+    against what the broker really offers rather than guessed at."""
+    try:
+        result = pool.get(account_id).call("symbols", timeout=settings.snapshot_timeout)
+    except WorkerDown as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CommandFailed as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    names = result.get("symbols") or []
+    if q:
+        needle = q.strip().upper()
+        names = [n for n in names if needle in n.upper()]
+    return {"symbols": sorted(names), "total": len(names)}
+
+
 @app.post("/v1/links/{link_id}/arm", dependencies=[Depends(require_secret)])
 def arm(link_id: str) -> dict[str, Any]:
     """Clear a halt so a stopped link can run again."""
