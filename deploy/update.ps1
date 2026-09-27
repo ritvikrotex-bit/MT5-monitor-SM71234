@@ -25,6 +25,22 @@ function Step($what, [scriptblock]$command) {
     if ($LASTEXITCODE -ne 0) { throw "$what failed (exit code $LASTEXITCODE)" }
 }
 
+# Start a service and wait for it to be running. `nssm start` returns non-zero
+# with SERVICE_START_PENDING when a service is merely slow to come up (the
+# connector opening its Manager session, for instance), which is not a failure;
+# judging by its exit code aborted updates half way with the web app stopped.
+function Start-AppService($name) {
+    Write-Host "==> start $name"
+    nssm start $name 2>$null | Out-Null
+    $global:LASTEXITCODE = 0
+    for ($i = 0; $i -lt 45; $i++) {
+        $svc = Get-Service -Name $name -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq "Running") { Write-Host "    $name running"; return }
+        Start-Sleep -Seconds 2
+    }
+    throw "$name did not reach Running within 90 seconds (status: $($svc.Status)). See logs\$name.err.log"
+}
+
 $dataDir = Join-Path $AppDir "data"
 $backup = Join-Path $AppDir ("logs\data-backup\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 
@@ -67,7 +83,7 @@ $hasCopier = (Test-Path $copierPython) -and (Test-Path "mt5-copier\.env")
 if ($hasCopier) {
     Step "pip install (copier)" { & $copierPython -m pip install --disable-pip-version-check -r mt5-copier\requirements.txt }
 }
-Step "start connector" { nssm start MT5MonitorConnector }
-if ($hasCopier) { Step "start copier" { nssm start MT5MonitorCopier } }
-Step "start web" { nssm start MT5MonitorWeb }
+Start-AppService MT5MonitorConnector
+if ($hasCopier) { Start-AppService MT5MonitorCopier }
+Start-AppService MT5MonitorWeb
 Write-Host "deployed $(git rev-parse --short HEAD)"
