@@ -95,10 +95,23 @@ class CopyRules:
     # -- symbols -----------------------------------------------------------
 
     def symbol_allowed(self, master_symbol: str) -> bool:
+        return self.filter_reason(master_symbol) is None
+
+    def filter_reason(self, master_symbol: str) -> str | None:
+        """Why this symbol is not copied, or None when it is allowed.
+
+        Returned as a sentence rather than a boolean because a filter that
+        silently swallows trades is indistinguishable from a broken copier.
+        """
         base = symbol_base(master_symbol)
         if base in self.deny_symbols:
-            return False
-        return not self.allow_symbols or base in self.allow_symbols
+            return f"{base} is on this link's blocked list"
+        if self.allow_symbols and base not in self.allow_symbols:
+            allowed = ", ".join(sorted(self.allow_symbols))
+            return (
+                f"this link is set to copy only {allowed}, and {base} is not one of them"
+            )
+        return None
 
     def resolve_symbol(self, master_symbol: str, index: SymbolIndex) -> str:
         """Find the destination symbol for a master symbol.

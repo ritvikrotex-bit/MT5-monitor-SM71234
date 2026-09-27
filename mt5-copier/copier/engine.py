@@ -612,8 +612,17 @@ class Engine:
             master_position = master_by_ticket[master_ticket]
             symbol = master_position["symbol"]
 
-            if not link.rules.symbol_allowed(symbol):
+            filtered = link.rules.filter_reason(symbol)
+            if filtered:
+                # Permanent for this trade, so it is written off rather than
+                # retried — but never silently: a filter nobody can see looks
+                # exactly like a copier that has stopped working.
                 state.ignored.append(master_ticket)
+                self._emit(
+                    link, "filtered",
+                    f"not copying master #{master_ticket} ({symbol}): {filtered}",
+                    masterTicket=master_ticket, symbol=symbol,
+                )
                 continue
             if not state.should_retry(master_ticket, now):
                 continue
