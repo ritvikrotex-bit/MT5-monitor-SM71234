@@ -178,3 +178,29 @@ export async function flattenCopierLink(
 ): Promise<{ ok: boolean; closed: number; remaining: number }> {
   return call(`/v1/links/${linkId}/flatten`, { method: "POST" });
 }
+
+export type PreviewRow = {
+  source: string;
+  destination: string | null;
+  status: "AUTO" | "MANUAL" | "BLOCKED" | "AMBIGUOUS" | "UNMATCHED";
+  detail: string;
+};
+
+export type TranslationPreview = {
+  counts: Partial<Record<PreviewRow["status"], number>>;
+  matching: number;
+  sourceTotal: number;
+  destinationTotal: number;
+  rows: PreviewRow[];
+};
+
+/** How a link would translate every symbol its master could trade. */
+export async function copierLinkPreview(
+  linkId: string,
+  query = "",
+  limit = 400,
+): Promise<TranslationPreview> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (query) params.set("q", query);
+  return call(`/v1/links/${linkId}/preview?${params}`, { method: "GET" });
+}

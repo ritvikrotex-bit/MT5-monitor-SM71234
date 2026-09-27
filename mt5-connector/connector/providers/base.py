@@ -5,6 +5,7 @@ from connector.schemas import (
     Credentials,
     PositionsResponse,
     SearchResponse,
+    SymbolsResponse,
 )
 
 
@@ -30,4 +31,7 @@ class Provider:
         raise NotImplementedError
 
     def get_positions(self, creds: Credentials, account: int) -> PositionsResponse:
+        raise NotImplementedError
+
+    def list_symbols(self, creds: Credentials) -> SymbolsResponse:
         raise NotImplementedError

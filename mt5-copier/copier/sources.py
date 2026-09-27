@@ -218,3 +218,21 @@ class MasterReader:
         if self.pool is None:
             raise SourceUnavailable("no worker pool is available for terminal masters")
         return self.pool.get(spec.account_id).call("snapshot", timeout=45)
+
+
+def manager_symbols(connector: ConnectorClient | None, spec: MasterSpec) -> list[str]:
+    """Symbol names available on the master's server.
+
+    Only meaningful for a manager-read master: a terminal-read one already has
+    its own worker to ask.
+    """
+    if not isinstance(spec, ManagerMaster):
+        raise SourceUnavailable("symbols are only listed for manager-read masters")
+    if connector is None:
+        raise SourceUnavailable("no connector is configured for manager masters")
+    payload = connector.post("/v1/symbols", {
+        "server": spec.server,
+        "login": spec.manager_login,
+        "password": spec.manager_password,
+    })
+    return [str(name) for name in (payload.get("symbols") or []) if name]

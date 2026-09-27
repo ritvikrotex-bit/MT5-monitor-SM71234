@@ -1,7 +1,8 @@
 """Read-only MT5 Manager provider for real client and position data.
 
 Only these Manager API read methods are used: ``UserGet``, optional
-``UserAccountGet``, optional ``UserGetByGroup`` and ``PositionGet``.  Session
+``UserAccountGet``, optional ``UserGetByGroup``, ``PositionGet`` and the
+symbol list.  Session
 creation remains in :mod:`connector.session`; no trade, dealer, order or
 position-mutation method is exposed here.
 """
@@ -14,7 +15,13 @@ from connector.config import settings
 from connector.errors import AccountNotFound, ConnectorError
 from connector.normalize import client_from_user, position_from_mt
 from connector.providers.base import Provider
-from connector.schemas import AccountResponse, Credentials, PositionsResponse, SearchResponse
+from connector.schemas import (
+    AccountResponse,
+    Credentials,
+    PositionsResponse,
+    SearchResponse,
+    SymbolsResponse,
+)
 from connector import session as pool
 
 T = TypeVar("T")
@@ -191,3 +198,34 @@ class RealProvider(Provider):
             slTpAvailable=any(position.sl is not None or position.tp is not None for position in positions),
             mode=self.mode,
         )
+
+    def list_symbols(self, creds: Credentials) -> SymbolsResponse:
+        """Every symbol the server defines, by name.
+
+        Used to preview how a copier link will translate symbols before any
+        trade depends on it. Names only: the full configuration objects are
+        large and nothing downstream needs the rest.
+        """
+
+        def load(manager: Any):
+            method = getattr(manager, "SymbolGetArray", None)
+            if callable(method):
+                return [str(getattr(entry, "Symbol", "") or "") for entry in (method() or [])]
+
+            # Older SDKs only walk the list one entry at a time.
+            total = getattr(manager, "SymbolTotal", None)
+            step = getattr(manager, "SymbolNext", None)
+            if not callable(total) or not callable(step):
+                raise ConnectorError(
+                    "This MT5 Manager SDK does not expose a symbol list.",
+                    "SYMBOLS_NOT_SUPPORTED",
+                )
+            names = []
+            for index in range(int(total() or 0)):
+                entry = step(index)
+                if entry is not None:
+                    names.append(str(getattr(entry, "Symbol", "") or ""))
+            return names
+
+        names = sorted({name for name in self._read(creds, load) if name})
+        return SymbolsResponse(symbols=names, total=len(names), mode=self.mode)

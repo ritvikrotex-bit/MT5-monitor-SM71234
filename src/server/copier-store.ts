@@ -52,6 +52,8 @@ export type PublicCopierAccount = Omit<StoredCopierAccount, "encryptedPassword">
 export type CopierRules = {
   symbolMap: Record<string, string>;
   symbolSuffix: string;
+  /** Match by undecorated base name. Off means only hand mappings are copied. */
+  autoMatch: boolean;
   allowSymbols: string[];
   denySymbols: string[];
   lotMode: "FIXED" | "MULTIPLIER" | "BALANCE" | "EQUITY";
@@ -97,6 +99,7 @@ type FileShape = { accounts: StoredCopierAccount[]; links: StoredCopierLink[] };
 export const DEFAULT_RULES: CopierRules = {
   symbolMap: {},
   symbolSuffix: "",
+  autoMatch: true,
   allowSymbols: [],
   denySymbols: [],
   lotMode: "BALANCE",
@@ -289,8 +292,13 @@ export function normaliseRules(input: Partial<CopierRules> | undefined): CopierR
     throw new ApiError("INVALID_RULES", "The maximum lot cannot be negative.", 400);
   }
   return {
-    symbolMap: raw.symbolMap ?? {},
+    symbolMap: Object.fromEntries(
+      Object.entries(raw.symbolMap ?? {})
+        .map(([from, to]) => [String(from).trim(), String(to).trim()])
+        .filter(([from, to]) => from && to),
+    ),
     symbolSuffix: (raw.symbolSuffix ?? "").trim(),
+    autoMatch: raw.autoMatch ?? true,
     allowSymbols: (raw.allowSymbols ?? []).map((s) => String(s).trim()).filter(Boolean),
     denySymbols: (raw.denySymbols ?? []).map((s) => String(s).trim()).filter(Boolean),
     lotMode,

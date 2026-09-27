@@ -19,9 +19,15 @@ from pydantic import BaseModel, Field
 
 from copier.config import settings
 from copier.engine import Engine, Link
-from copier.sources import TerminalMaster
 from copier.pool import Account, CommandFailed, Pool, WorkerDown
-from copier.sources import ConnectorClient, MasterReader
+from copier.rules import SymbolIndex, preview_translation
+from copier.sources import (
+    ConnectorClient,
+    MasterReader,
+    SourceUnavailable,
+    TerminalMaster,
+    manager_symbols,
+)
 from copier.state import StateStore
 
 log = logging.getLogger("copier.main")
@@ -178,6 +184,54 @@ def symbol_spec(account_id: str, symbol: str) -> dict[str, Any]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except CommandFailed as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/v1/links/{link_id}/preview", dependencies=[Depends(require_secret)])
+def preview(link_id: str, q: str = "", limit: int = 400) -> dict[str, Any]:
+    """How this link would translate every symbol the master could trade.
+
+    The counts cover the master's whole symbol list; the rows are capped so a
+    server with thousands of instruments does not have to be sent in full.
+    """
+    link = engine.links.get(link_id)
+    if link is None:
+        raise HTTPException(status_code=404, detail="unknown link")
+
+    try:
+        if isinstance(link.master, TerminalMaster):
+            source_symbols = pool.get(link.master.account_id).call(
+                "symbols", timeout=settings.snapshot_timeout
+            ).get("symbols") or []
+        else:
+            source_symbols = manager_symbols(masters.connector, link.master)
+        dest_names = pool.get(link.dest_id).call(
+            "symbols", timeout=settings.snapshot_timeout
+        ).get("symbols") or []
+    except SourceUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except WorkerDown as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except CommandFailed as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    rows = preview_translation(link.rules, sorted(source_symbols), SymbolIndex(dest_names))
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["status"]] = counts.get(row["status"], 0) + 1
+
+    if q:
+        needle = q.strip().upper()
+        rows = [
+            r for r in rows
+            if needle in r["source"].upper() or needle in (r["destination"] or "").upper()
+        ]
+    return {
+        "counts": counts,
+        "matching": len(rows),
+        "sourceTotal": len(source_symbols),
+        "destinationTotal": len(dest_names),
+        "rows": rows[: max(1, min(limit, 2000))],
+    }
 
 
 @app.post("/v1/links/{link_id}/arm", dependencies=[Depends(require_secret)])

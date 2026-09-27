@@ -21,6 +21,7 @@ from connector.schemas import (
     SearchRequest,
     SearchResponse,
     SessionRequest,
+    SymbolsResponse,
     StatusResponse,
     TestResponse,
 )
@@ -105,6 +106,16 @@ def session_status(req: SessionRequest):
     provider = get_provider()
     st, message = provider.status(req)
     return StatusResponse(status=st, message=message, mode=provider.mode)
+
+
+@app.post("/v1/symbols", response_model=SymbolsResponse, dependencies=[Depends(require_secret)])
+def list_symbols(creds: Credentials):
+    """Symbol names configured on this server, for copier translation previews."""
+    provider = get_provider()
+    try:
+        return provider.list_symbols(creds)
+    except Exception as exc:
+        return _http_for(exc)
 
 
 @app.post("/v1/clients/search", response_model=SearchResponse, dependencies=[Depends(require_secret)])

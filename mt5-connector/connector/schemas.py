@@ -78,3 +78,11 @@ class PositionsResponse(BaseModel):
     positions: list[OpenPosition]
     slTpAvailable: bool
     mode: str
+
+
+class SymbolsResponse(BaseModel):
+    """Every symbol configured on the server this Manager session is on."""
+
+    symbols: list[str]
+    total: int
+    mode: str

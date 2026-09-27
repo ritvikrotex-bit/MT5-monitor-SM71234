@@ -55,6 +55,10 @@ class CopyRules:
     """Explicit master symbol -> destination symbol. Wins over everything else."""
     symbol_suffix: str = ""
     """Preferred destination suffix when a base name matches several symbols."""
+    auto_match: bool = True
+    """Match by undecorated base name. Turn it off to copy only what is mapped
+    by hand, which is the safe choice when the two brokers' naming does not line
+    up and a wrong match would trade the wrong instrument."""
     allow_symbols: list[str] = field(default_factory=list)
     """Base names to copy. Empty means all."""
     deny_symbols: list[str] = field(default_factory=list)
@@ -132,6 +136,12 @@ class CopyRules:
         mapped = self.symbol_map.get(master_symbol.upper())
         if mapped:
             return index.exact(mapped) or mapped
+
+        if not self.auto_match:
+            raise RuleError(
+                f"{master_symbol} has no mapping, and matching by base name is turned off "
+                "for this link"
+            )
 
         exact = index.exact(master_symbol)
         if exact:
@@ -224,6 +234,7 @@ class CopyRules:
         return {
             "symbolMap": self.symbol_map,
             "symbolSuffix": self.symbol_suffix,
+            "autoMatch": self.auto_match,
             "allowSymbols": self.allow_symbols,
             "denySymbols": self.deny_symbols,
             "lotMode": self.lot_mode,
@@ -243,6 +254,7 @@ class CopyRules:
         return cls(
             symbol_map=raw.get("symbolMap") or {},
             symbol_suffix=raw.get("symbolSuffix") or "",
+            auto_match=raw.get("autoMatch", True),
             allow_symbols=raw.get("allowSymbols") or [],
             deny_symbols=raw.get("denySymbols") or [],
             lot_mode=raw.get("lotMode") or "MULTIPLIER",
@@ -255,3 +267,68 @@ class CopyRules:
             max_open_positions=int(raw.get("maxOpenPositions") or 0),
             max_slippage_points=int(raw.get("maxSlippagePoints") or 20),
         )
+
+
+# Preview statuses, in the order an operator cares about them.
+PREVIEW_BLOCKED = "BLOCKED"
+PREVIEW_MANUAL = "MANUAL"
+PREVIEW_AUTO = "AUTO"
+PREVIEW_AMBIGUOUS = "AMBIGUOUS"
+PREVIEW_UNMATCHED = "UNMATCHED"
+
+
+def preview_translation(
+    rules: "CopyRules", master_symbols: Iterable[str], index: SymbolIndex
+) -> list[dict[str, Any]]:
+    """Work out, per master symbol, what this link would do with it.
+
+    Answers the question a skipped trade raises — "why did that not copy?" —
+    before any money depends on the answer, and names the reason rather than
+    just reporting a failure.
+    """
+    rows: list[dict[str, Any]] = []
+    for name in master_symbols:
+        blocked = rules.filter_reason(name)
+        if blocked:
+            rows.append({
+                "source": name,
+                "destination": None,
+                "status": PREVIEW_BLOCKED,
+                "detail": blocked,
+            })
+            continue
+        manual = rules.symbol_map.get(name.upper())
+        try:
+            resolved = rules.resolve_symbol(name, index)
+        except RuleError as exc:
+            # An ambiguous base name is a different problem from no match at
+            # all: one needs a suffix or a mapping, the other cannot be copied.
+            status = (
+                PREVIEW_AMBIGUOUS if "several destination symbols" in str(exc)
+                else PREVIEW_UNMATCHED
+            )
+            rows.append({
+                "source": name, "destination": None, "status": status, "detail": str(exc),
+            })
+            continue
+        if manual:
+            known = index.exact(manual)
+            rows.append({
+                "source": name,
+                "destination": resolved,
+                "status": PREVIEW_MANUAL,
+                "detail": (
+                    "mapped by hand"
+                    if known
+                    else "mapped by hand; the destination has not listed this symbol yet, "
+                         "so it will be confirmed with the terminal when a trade arrives"
+                ),
+            })
+        else:
+            rows.append({
+                "source": name,
+                "destination": resolved,
+                "status": PREVIEW_AUTO,
+                "detail": f"matched on the base name {symbol_base(name)}",
+            })
+    return rows

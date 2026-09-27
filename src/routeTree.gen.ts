@@ -58,6 +58,7 @@ import { Route as ApiCopierAccountsIdProbeRouteImport } from './routes/api/copie
 import { Route as ApiCopierAccountsIdSymbolsRouteImport } from './routes/api/copier.accounts.$id.symbols'
 import { Route as ApiCopierLinksIdArmRouteImport } from './routes/api/copier.links.$id.arm'
 import { Route as ApiCopierLinksIdFlattenRouteImport } from './routes/api/copier.links.$id.flatten'
+import { Route as ApiCopierLinksIdPreviewRouteImport } from './routes/api/copier.links.$id.preview'
 import { Route as ApiBrokersIdClientsLoginPositionsRouteImport } from './routes/api/brokers.$id.clients.$login.positions'
 
 const IndexRoute = IndexRouteImport.update({
@@ -312,6 +313,11 @@ const ApiCopierLinksIdFlattenRoute = ApiCopierLinksIdFlattenRouteImport.update({
   path: '/flatten',
   getParentRoute: () => ApiCopierLinksIdRoute,
 } as any)
+const ApiCopierLinksIdPreviewRoute = ApiCopierLinksIdPreviewRouteImport.update({
+  id: '/preview',
+  path: '/preview',
+  getParentRoute: () => ApiCopierLinksIdRoute,
+} as any)
 const ApiBrokersIdClientsLoginPositionsRoute =
   ApiBrokersIdClientsLoginPositionsRouteImport.update({
     id: '/positions',
@@ -369,6 +375,7 @@ export interface FileRoutesByFullPath {
   '/api/copier/accounts/$id/symbols': typeof ApiCopierAccountsIdSymbolsRoute
   '/api/copier/links/$id/arm': typeof ApiCopierLinksIdArmRoute
   '/api/copier/links/$id/flatten': typeof ApiCopierLinksIdFlattenRoute
+  '/api/copier/links/$id/preview': typeof ApiCopierLinksIdPreviewRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
 }
 export interface FileRoutesByTo {
@@ -421,6 +428,7 @@ export interface FileRoutesByTo {
   '/api/copier/accounts/$id/symbols': typeof ApiCopierAccountsIdSymbolsRoute
   '/api/copier/links/$id/arm': typeof ApiCopierLinksIdArmRoute
   '/api/copier/links/$id/flatten': typeof ApiCopierLinksIdFlattenRoute
+  '/api/copier/links/$id/preview': typeof ApiCopierLinksIdPreviewRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
 }
 export interface FileRoutesById {
@@ -474,6 +482,7 @@ export interface FileRoutesById {
   '/api/copier/accounts/$id/symbols': typeof ApiCopierAccountsIdSymbolsRoute
   '/api/copier/links/$id/arm': typeof ApiCopierLinksIdArmRoute
   '/api/copier/links/$id/flatten': typeof ApiCopierLinksIdFlattenRoute
+  '/api/copier/links/$id/preview': typeof ApiCopierLinksIdPreviewRoute
   '/api/brokers/$id/clients/$login/positions': typeof ApiBrokersIdClientsLoginPositionsRoute
 }
 export interface FileRouteTypes {
@@ -528,6 +537,7 @@ export interface FileRouteTypes {
     | '/api/copier/accounts/$id/symbols'
     | '/api/copier/links/$id/arm'
     | '/api/copier/links/$id/flatten'
+    | '/api/copier/links/$id/preview'
     | '/api/brokers/$id/clients/$login/positions'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -580,6 +590,7 @@ export interface FileRouteTypes {
     | '/api/copier/accounts/$id/symbols'
     | '/api/copier/links/$id/arm'
     | '/api/copier/links/$id/flatten'
+    | '/api/copier/links/$id/preview'
     | '/api/brokers/$id/clients/$login/positions'
   id:
     | '__root__'
@@ -632,6 +643,7 @@ export interface FileRouteTypes {
     | '/api/copier/accounts/$id/symbols'
     | '/api/copier/links/$id/arm'
     | '/api/copier/links/$id/flatten'
+    | '/api/copier/links/$id/preview'
     | '/api/brokers/$id/clients/$login/positions'
   fileRoutesById: FileRoutesById
 }
@@ -1014,6 +1026,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCopierLinksIdFlattenRouteImport
       parentRoute: typeof ApiCopierLinksIdRoute
     }
+    '/api/copier/links/$id/preview': {
+      id: '/api/copier/links/$id/preview'
+      path: '/preview'
+      fullPath: '/api/copier/links/$id/preview'
+      preLoaderRoute: typeof ApiCopierLinksIdPreviewRouteImport
+      parentRoute: typeof ApiCopierLinksIdRoute
+    }
     '/api/brokers/$id/clients/$login/positions': {
       id: '/api/brokers/$id/clients/$login/positions'
       path: '/positions'
@@ -1096,11 +1115,13 @@ const ApiCopierAccountsRouteWithChildren =
 interface ApiCopierLinksIdRouteChildren {
   ApiCopierLinksIdArmRoute: typeof ApiCopierLinksIdArmRoute
   ApiCopierLinksIdFlattenRoute: typeof ApiCopierLinksIdFlattenRoute
+  ApiCopierLinksIdPreviewRoute: typeof ApiCopierLinksIdPreviewRoute
 }
 
 const ApiCopierLinksIdRouteChildren: ApiCopierLinksIdRouteChildren = {
   ApiCopierLinksIdArmRoute: ApiCopierLinksIdArmRoute,
   ApiCopierLinksIdFlattenRoute: ApiCopierLinksIdFlattenRoute,
+  ApiCopierLinksIdPreviewRoute: ApiCopierLinksIdPreviewRoute,
 }
 
 const ApiCopierLinksIdRouteWithChildren =

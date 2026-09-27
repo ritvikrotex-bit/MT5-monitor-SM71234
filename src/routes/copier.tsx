@@ -25,6 +25,13 @@ import {
   inputClass,
   money,
 } from "@/components/mt5/copier-parts";
+import {
+  SymbolTranslation,
+  translationDefaults,
+  translationPayload,
+  translationProblem,
+  type TranslationForm,
+} from "@/components/mt5/SymbolTranslation";
 import { cn } from "@/lib/utils";
 
 type Role = "MASTER" | "DESTINATION" | "BOTH";
@@ -44,6 +51,7 @@ type Master =
   { kind: "MANAGER"; brokerId: string; login: number } | { kind: "TERMINAL"; accountId: string };
 
 type Rules = {
+  autoMatch: boolean;
   lotMode: "FIXED" | "MULTIPLIER" | "BALANCE" | "EQUITY";
   lotValue: number;
   maxLot: number;
@@ -893,10 +901,6 @@ type RulesForm = {
   lotValue: string;
   maxLot: string;
   minVolumeAction: Rules["minVolumeAction"];
-  symbolSuffix: string;
-  symbolMap: string;
-  allowSymbols: string;
-  denySymbols: string;
   maxOpenPositions: string;
   maxSlippagePoints: string;
   maxDrawdownPct: string;
@@ -912,12 +916,6 @@ function rulesDefaults(link?: CopyLink): RulesForm {
     lotValue: String(r?.lotValue ?? 1),
     maxLot: String(r?.maxLot ?? 0),
     minVolumeAction: r?.minVolumeAction ?? "SKIP",
-    symbolSuffix: r?.symbolSuffix ?? "",
-    symbolMap: Object.entries(r?.symbolMap ?? {})
-      .map(([from, to]) => `${from} = ${to}`)
-      .join("\n"),
-    allowSymbols: (r?.allowSymbols ?? []).join(", "),
-    denySymbols: (r?.denySymbols ?? []).join(", "),
     maxOpenPositions: String(r?.maxOpenPositions ?? 0),
     maxSlippagePoints: String(r?.maxSlippagePoints ?? 20),
     maxDrawdownPct: String(link?.maxDrawdownPct ?? 0),
@@ -927,24 +925,7 @@ function rulesDefaults(link?: CopyLink): RulesForm {
   };
 }
 
-const parseList = (raw: string) =>
-  raw
-    .split(/[\n,]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-/** "XAUUSD.c = XAUUSD.s" per line, or comma separated. */
-function parseSymbolMap(raw: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of parseList(raw)) {
-    const [from, to] = line.split(/[=>:]+/).map((s) => s.trim());
-    if (!from || !to) throw new Error(`"${line}" should look like XAUUSD.c = XAUUSD.s`);
-    out[from] = to;
-  }
-  return out;
-}
-
-function rulesPayload(form: RulesForm) {
+function rulesPayload(form: RulesForm, translation: TranslationForm) {
   return {
     maxDrawdownPct: Number(form.maxDrawdownPct),
     rules: {
@@ -952,15 +933,12 @@ function rulesPayload(form: RulesForm) {
       lotValue: Number(form.lotValue),
       maxLot: Number(form.maxLot),
       minVolumeAction: form.minVolumeAction,
-      symbolSuffix: form.symbolSuffix,
-      symbolMap: parseSymbolMap(form.symbolMap),
-      allowSymbols: parseList(form.allowSymbols),
-      denySymbols: parseList(form.denySymbols),
       maxOpenPositions: Number(form.maxOpenPositions),
       maxSlippagePoints: Number(form.maxSlippagePoints),
       reverse: form.reverse,
       copySlTp: form.copySlTp,
       copyExisting: form.copyExisting,
+      ...translationPayload(translation),
     },
   };
 }
@@ -971,24 +949,31 @@ type FieldSetter = (
 
 function useRulesForm(link?: CopyLink) {
   const [form, setForm] = useState<RulesForm>(() => rulesDefaults(link));
+  const [translation, setTranslation] = useState<TranslationForm>(() =>
+    translationDefaults(link?.rules),
+  );
   const set: FieldSetter = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
   const toggle = (key: keyof RulesForm) => (value: boolean) =>
     setForm((f) => ({ ...f, [key]: value }));
-  return { form, set, toggle };
+  return { form, set, toggle, translation, setTranslation };
 }
 
 function RulesFields({
   form,
   set,
   toggle,
-  mapError,
-  destAccountId,
+  translation,
+  setTranslation,
+  linkId,
+  destinationSymbols,
 }: {
   form: RulesForm;
   set: FieldSetter;
   toggle: (key: keyof RulesForm) => (value: boolean) => void;
-  mapError: string | null;
-  destAccountId: string | undefined;
+  translation: TranslationForm;
+  setTranslation: (next: TranslationForm) => void;
+  linkId: string | undefined;
+  destinationSymbols: string[];
 }) {
   return (
     <>
@@ -1047,52 +1032,12 @@ function RulesFields({
         </p>
       </fieldset>
 
-      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
-        <legend className="px-1 text-xs font-semibold">Symbol translation</legend>
-        <p className="text-[11px] break-words text-muted-foreground">
-          Names are matched by their base, so <code>XAUUSD.c</code> finds <code>XAUUSD.s</code> on
-          its own. You only need these when a base name matches more than one symbol, or when the
-          two brokers name an instrument differently. A symbol that cannot be matched is skipped and
-          reported, never guessed at.
-        </p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Destination suffix" hint="Breaks a tie, e.g. .s">
-            <input
-              className={inputClass}
-              value={form.symbolSuffix}
-              onChange={set("symbolSuffix")}
-              placeholder=".s"
-            />
-          </Field>
-          <Field label="Explicit mappings" hint="One per line: XAUUSD.c = XAUUSD.s">
-            <textarea
-              rows={3}
-              className={inputClass}
-              value={form.symbolMap}
-              onChange={set("symbolMap")}
-              placeholder="XAUUSD.c = XAUUSD.s"
-            />
-          </Field>
-          <Field label="Only copy these" hint="Base names, comma or line separated. Empty = all.">
-            <input
-              className={inputClass}
-              value={form.allowSymbols}
-              onChange={set("allowSymbols")}
-              placeholder="XAUUSD, EURUSD"
-            />
-          </Field>
-          <Field label="Never copy these" hint="Base names, comma or line separated.">
-            <input
-              className={inputClass}
-              value={form.denySymbols}
-              onChange={set("denySymbols")}
-              placeholder="BTCUSD"
-            />
-          </Field>
-        </div>
-        {mapError && <p className="text-[11px] break-words text-destructive">{mapError}</p>}
-        {destAccountId && <SymbolBrowser accountId={destAccountId} />}
-      </fieldset>
+      <SymbolTranslation
+        form={translation}
+        onChange={setTranslation}
+        linkId={linkId}
+        destinationSymbols={destinationSymbols}
+      />
 
       <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
         <legend className="px-1 text-xs font-semibold">Limits and behaviour</legend>
@@ -1154,79 +1099,27 @@ function RulesFields({
   );
 }
 
-/** What the destination broker actually offers, so a mapping can be checked
- *  against reality instead of guessed at. */
-function SymbolBrowser({ accountId }: { accountId: string }) {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+/** Destination symbol names, for autocompleting a mapping's right-hand side. */
+function useDestinationSymbols(accountId: string | undefined): string[] {
   const [symbols, setSymbols] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState("");
-
   useEffect(() => {
-    if (!open || symbols.length || loading) return;
-    setLoading(true);
-    setError(null);
+    if (!accountId) {
+      setSymbols([]);
+      return;
+    }
+    let cancelled = false;
     api<{ symbols: string[] }>(`/api/copier/accounts/${accountId}/symbols`)
-      .then((d) => setSymbols(d.symbols))
-      .catch((e) => setError(e instanceof Error ? e.message : "Could not list symbols."))
-      .finally(() => setLoading(false));
-  }, [open, accountId, symbols.length, loading]);
-
-  const shown = filter
-    ? symbols.filter((s) => s.toUpperCase().includes(filter.toUpperCase()))
-    : symbols;
-
-  return (
-    <div className="rounded-lg border border-border/70 bg-background/40 p-2.5">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-2 text-[11px] font-medium"
-      >
-        <span>Symbols this destination offers</span>
-        <ChevronDown
-          className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-180")}
-        />
-      </button>
-      {open && (
-        <div className="mt-2 space-y-2">
-          {loading && <p className="text-[11px] text-muted-foreground">Loading...</p>}
-          {error && (
-            <p className="text-[11px] break-words text-destructive">
-              {error} The destination terminal has to be running to list its symbols.
-            </p>
-          )}
-          {symbols.length > 0 && (
-            <>
-              <input
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter, e.g. XAU"
-                className={inputClass}
-              />
-              <p className="text-[11px] break-words text-muted-foreground">
-                {shown.length} of {symbols.length}
-                {filter && shown.length === 0
-                  ? " — nothing matches, so this instrument cannot be copied here"
-                  : ""}
-              </p>
-              <div className="flex max-h-40 flex-wrap gap-1 overflow-y-auto">
-                {shown.map((s) => (
-                  <span
-                    key={s}
-                    className="num rounded bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                  >
-                    {s}
-                  </span>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-    </div>
-  );
+      .then((d) => {
+        if (!cancelled) setSymbols(d.symbols);
+      })
+      // Autocomplete is a convenience; a destination whose terminal is still
+      // starting simply offers no suggestions.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId]);
+  return symbols;
 }
 
 function EditLinkForm({
@@ -1242,23 +1135,22 @@ function EditLinkForm({
   onCancel: () => void;
   onSave: (body: Record<string, unknown>) => void;
 }) {
-  const { form, set, toggle } = useRulesForm(link);
+  const { form, set, toggle, translation, setTranslation } = useRulesForm(link);
   const [label, setLabel] = useState(link.label);
-  const [mapError, setMapError] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const destinationSymbols = useDestinationSymbols(destAccountId);
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        let payload;
-        try {
-          payload = rulesPayload(form);
-          setMapError(null);
-        } catch (err) {
-          setMapError(err instanceof Error ? err.message : "Check the symbol mappings.");
+        const bad = translationProblem(translation);
+        if (bad) {
+          setProblem(bad);
           return;
         }
-        onSave({ label, ...payload });
+        setProblem(null);
+        onSave({ label, ...rulesPayload(form, translation) });
       }}
       className="mt-3 space-y-4 rounded-xl border border-primary/30 bg-primary/5 p-3 sm:p-4"
     >
@@ -1278,9 +1170,12 @@ function EditLinkForm({
         form={form}
         set={set}
         toggle={toggle}
-        mapError={mapError}
-        destAccountId={destAccountId}
+        translation={translation}
+        setTranslation={setTranslation}
+        linkId={link.id}
+        destinationSymbols={destinationSymbols}
       />
+      {problem && <p className="text-[11px] break-words text-destructive">{problem}</p>}
       {link.enabled && !link.dryRun && (
         <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] break-words text-amber-600 dark:text-amber-400">
           This link is live. New rules apply to trades from the moment you save; copies already open
@@ -1307,7 +1202,7 @@ function LinkForm({
 }) {
   const destinations = accounts.filter((a) => a.role !== "MASTER");
   const terminalMasters = accounts.filter((a) => a.role !== "DESTINATION");
-  const { form, set, toggle } = useRulesForm();
+  const { form, set, toggle, translation, setTranslation } = useRulesForm();
   const [head, setHead] = useState({
     label: "",
     masterKind: "MANAGER" as Master["kind"],
@@ -1316,7 +1211,8 @@ function LinkForm({
     masterAccountId: terminalMasters[0]?.id ?? "",
     destAccountId: destinations[0]?.id ?? "",
   });
-  const [mapError, setMapError] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const createDestinationSymbols = useDestinationSymbols(head.destAccountId || undefined);
   const setHeadField =
     (key: keyof typeof head) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       setHead((f) => ({ ...f, [key]: e.target.value }));
@@ -1325,14 +1221,13 @@ function LinkForm({
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        let payload;
-        try {
-          payload = rulesPayload(form);
-          setMapError(null);
-        } catch (err) {
-          setMapError(err instanceof Error ? err.message : "Check the symbol mappings.");
+        const bad = translationProblem(translation);
+        if (bad) {
+          setProblem(bad);
           return;
         }
+        setProblem(null);
+        const payload = rulesPayload(form, translation);
         onSave({
           label: head.label,
           master:
@@ -1447,9 +1342,12 @@ function LinkForm({
         form={form}
         set={set}
         toggle={toggle}
-        mapError={mapError}
-        destAccountId={head.destAccountId || undefined}
+        translation={translation}
+        setTranslation={setTranslation}
+        linkId={undefined}
+        destinationSymbols={createDestinationSymbols}
       />
+      {problem && <p className="text-[11px] break-words text-destructive">{problem}</p>}
 
       <FormButtons busy={busy} onCancel={onCancel} submitLabel="Create link" />
       <p className="text-[11px] break-words text-muted-foreground">
