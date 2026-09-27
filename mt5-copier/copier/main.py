@@ -136,8 +136,12 @@ def get_status() -> dict[str, Any]:
 
 
 @app.get("/v1/events", dependencies=[Depends(require_secret)])
-def get_events(limit: int = 100) -> dict[str, Any]:
-    return {"events": engine.events(min(max(limit, 1), 500))}
+def get_events(limit: int = 100, since: int = -1) -> dict[str, Any]:
+    """Recent decisions. With ``since`` it returns only what follows that
+    cursor, oldest first, so an alerter cannot miss or repeat one. Omit it to
+    read the feed newest first."""
+    events = engine.events(min(max(limit, 1), 500), since=since)
+    return {"events": events, "cursor": engine.sequence}
 
 
 @app.post("/v1/accounts/{account_id}/probe", dependencies=[Depends(require_secret)])

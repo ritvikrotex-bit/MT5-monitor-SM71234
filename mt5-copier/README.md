@@ -89,6 +89,23 @@ never increase exposure.
   on every cycle.
 - A symbol that cannot be resolved is **skipped and reported**, never guessed.
 
+## Alerts
+
+The copier never talks to Telegram itself. Bot tokens are encrypted in the web
+app's store and belong to individual users, so the web app follows this
+service's event feed and sends on their behalf — each link's alerts go to the
+chat its own owner configured, and every secret stays in one place.
+
+Delivery follows the `seq` on each event rather than its timestamp. A cursor is
+the only thing that makes "send each event exactly once" survive a restart, a
+clock change or a slow cycle. Zero is a real cursor position — it is where a
+freshly restarted copier starts — so `since` defaults to `-1` for "no cursor,
+just give me the feed". Treating 0 as "no cursor" would replay the whole buffer
+backwards after every restart.
+
+Trades, closes, partial closes, skips, filtered symbols, halts and order errors
+are reported. Cycle bookkeeping is not.
+
 ## Endpoints
 
 All except `/health` require the `X-Copier-Secret` header.

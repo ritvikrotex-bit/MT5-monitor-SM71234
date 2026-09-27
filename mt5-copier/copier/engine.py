@@ -133,6 +133,7 @@ class Engine:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._events: list[dict[str, Any]] = []
+        self._sequence = 0
         self._cycle: dict[str, dict[str, Any]] = {}
         self._symbols: dict[str, tuple[float, SymbolIndex]] = {}
         self._specs: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
@@ -214,17 +215,23 @@ class Engine:
     # -- events ------------------------------------------------------------
 
     def _emit(self, link: Link, kind: str, message: str, **extra: Any) -> None:
-        event = {
-            "at": time.time(),
-            "linkId": link.id,
-            "linkLabel": link.label,
-            "ownerId": link.owner_id,
-            "kind": kind,
-            "message": message,
-            "dryRun": link.dry_run,
-            **extra,
-        }
         with self._lock:
+            self._sequence += 1
+            event = {
+                # A monotonic cursor, so a reader can ask for what it has not
+                # seen without relying on clocks or re-reading the whole buffer.
+                "seq": self._sequence,
+                "at": time.time(),
+                "linkId": link.id,
+                "linkLabel": link.label,
+                "ownerId": link.owner_id,
+                "masterLabel": link.master.label,
+                "destLabel": self._dest_label(link),
+                "kind": kind,
+                "message": message,
+                "dryRun": link.dry_run,
+                **extra,
+            }
             self._events.append(event)
             del self._events[:-500]
         log.info("[%s]%s %s: %s", link.label, " (dry run)" if link.dry_run else "", kind, message)
@@ -442,6 +449,8 @@ class Engine:
                 f"master closed #{master_ticket}; closing {position.get('symbol', '?')} "
                 f"{position.get('volume', '?')} (#{ticket})",
                 masterTicket=master_ticket, ticket=ticket,
+                symbol=position.get("symbol"), side=position.get("side"),
+                volume=position.get("volume"), profit=position.get("profit"),
             )
             if self._close(link, ticket, reason="master"):
                 state.mapping.pop(master_ticket, None)
@@ -712,13 +721,37 @@ class Engine:
                 f"copied master #{master_ticket} as #{ticket} "
                 f"({dest_symbol} {side} {volume} at {result.get('price')})",
                 masterTicket=master_ticket, ticket=ticket, price=result.get("price"),
+                symbol=dest_symbol, side=side, volume=volume,
+                masterSymbol=symbol, masterSide=master_position["side"],
+                masterVolume=float(master_position["volume"]),
             )
         self.state.save()
 
     # -- introspection -----------------------------------------------------
 
-    def events(self, limit: int = 100) -> list[dict[str, Any]]:
+    @property
+    def sequence(self) -> int:
+        """Highest event number emitted so far."""
         with self._lock:
+            return self._sequence
+
+    def _dest_label(self, link: Link) -> str:
+        try:
+            return self.pool.get(link.dest_id).account.label
+        except Exception:
+            return link.dest_id
+
+    def events(self, limit: int = 100, since: int = -1) -> list[dict[str, Any]]:
+        """Newest first, or oldest first when following a cursor.
+
+        A follower wants them in the order they happened; a reader showing a
+        feed wants the newest at the top. Zero is a real cursor position — it
+        is where a freshly restarted copier starts — so "no cursor" has to be
+        a separate value, or a restart would replay the whole buffer backwards.
+        """
+        with self._lock:
+            if since >= 0:
+                return [e for e in self._events if e.get("seq", 0) > since][:limit]
             return self._events[-limit:][::-1]
 
     def status(self) -> dict[str, Any]:

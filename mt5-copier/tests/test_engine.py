@@ -596,3 +596,58 @@ def test_a_changed_reason_is_reported_again(setup):
     skips = [e for e in engine.events() if e["kind"] == "skipped"]
     assert len(skips) == 2, "a different reason should be reported"
     assert "minimum" in skips[0]["message"]
+
+
+# -- the event feed --------------------------------------------------------
+
+def test_events_can_be_followed_from_a_cursor(setup):
+    master, dest, engine, store, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+    master.add("XAUUSD.c", "BUY", 0.10)
+    engine.run_link(link)
+
+    everything = engine.events(since=0)
+    assert [e["seq"] for e in everything] == sorted(e["seq"] for e in everything), "not oldest first"
+    assert len(everything) >= 2
+
+    after_first = engine.events(since=everything[0]["seq"])
+    assert all(e["seq"] > everything[0]["seq"] for e in after_first)
+    assert len(after_first) == len(everything) - 1
+
+
+def test_cursor_zero_means_from_the_beginning_not_the_whole_feed_backwards(setup):
+    """A copier that has just restarted is at sequence 0.
+
+    If 0 were treated as "no cursor", the first poll after a restart would hand
+    back the buffer newest-first and an alerter would replay it in reverse.
+    """
+    master, dest, engine, store, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+    master.add("XAUUSD.c", "BUY", 0.10)
+    engine.run_link(link)
+
+    from_zero = engine.events(since=0)
+    feed = engine.events()
+    assert [e["seq"] for e in from_zero] == sorted(e["seq"] for e in from_zero)
+    assert [e["seq"] for e in feed] == sorted((e["seq"] for e in feed), reverse=True)
+    assert from_zero[0]["seq"] < from_zero[-1]["seq"] or len(from_zero) == 1
+
+
+def test_every_event_names_both_accounts(setup):
+    """An alert showing only one side cannot be read as a copy or a miss."""
+    master, dest, engine, store, make_link = setup
+    link = make_link()
+    engine.run_link(link)
+    master.add("XAUUSD.c", "BUY", 0.10)
+    engine.run_link(link)
+
+    opened = next(e for e in engine.events() if e["kind"] == "opened")
+    assert opened["masterLabel"]
+    assert opened["destLabel"]
+    assert opened["masterSymbol"] == "XAUUSD.c"
+    assert opened["symbol"] == "XAUUSD.s"
+    assert opened["masterVolume"] == 0.10
+    assert opened["volume"] == 0.10
+    assert opened["masterTicket"] and opened["ticket"]

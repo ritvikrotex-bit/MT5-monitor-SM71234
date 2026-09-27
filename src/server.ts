@@ -3,6 +3,7 @@ import "./lib/error-capture";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { startBackgroundPoller } from "./server/alerting";
+import { startCopierAlerts } from "./server/copier-alerts";
 import { startCopierConfigSync } from "./server/copier-sync";
 import { initDatabaseSchema } from "./server/db";
 
@@ -14,6 +15,9 @@ startBackgroundPoller();
 
 // Hand the trade copier its configuration; it holds none of its own.
 startCopierConfigSync();
+
+// Forward copier decisions to each link owner's own Telegram bot.
+startCopierAlerts();
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;

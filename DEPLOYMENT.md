@@ -182,6 +182,32 @@ master's broker and MT5 login, and starts it. **New links start stopped and in
 dry run** — watch the activity log agree with what the master is doing before
 switching one live.
 
+### Telegram alerts for copied trades
+
+Nothing extra to configure. Every copy, close, skip, halt and order error for a
+link goes to the Telegram bot its owner already set up under Settings, showing
+both sides of the trade — the master account and ticket, and the destination
+account, ticket and fill. A user with no bot configured simply gets nothing.
+
+### Running 24/7
+
+`install-services.ps1` registers `MT5MonitorCopier` with automatic start,
+restart-on-exit after 5 seconds, and a dependency on `MT5MonitorConnector`, the
+same as the other two services. Three things make an unattended restart safe:
+
+* The copier holds no configuration of its own. The web app pushes it at boot
+  and re-pushes every 60 seconds, so a copier that restarts alone picks its
+  links back up without anyone touching the UI.
+* Which destination position mirrors which master one is on disk, and is
+  recoverable from the magic number and comment on the positions themselves, so
+  a restart cannot duplicate or orphan a copy.
+* Each destination terminal is supervised. Killing `terminal64.exe` outright
+  was tested: the worker noticed, relaunched it, re-attached to the account and
+  carried on within seconds.
+
+Alert delivery survives both restarts too — the cursor is persisted, so neither
+a web app restart nor a copier restart replays old trades into anyone's phone.
+
 Safety worth knowing before you arm anything:
 
 * A link halts, and stays halted until a human arms it, if the destination

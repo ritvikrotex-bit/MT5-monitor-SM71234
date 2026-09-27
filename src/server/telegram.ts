@@ -285,6 +285,23 @@ export async function sendTelegramTestMessage(
 }
 
 /** Delivers an alert to the chat of the user who owns the monitored client, and only to that chat. */
+/**
+ * Send one message to a user's own Telegram bot.
+ *
+ * Used by anything that is not a monitor alert — the trade copier, for
+ * instance — so it goes to the same chat the user configured for themselves
+ * and nowhere else.
+ */
+export async function sendTelegramText(
+  userId: string,
+  text: string,
+): Promise<{ status: "sent" | "not_configured" | "failed"; error?: string }> {
+  const cfg = await getTelegramConfig(userId);
+  if (!cfg) return { status: "not_configured" };
+  const res = await postMessage(cfg.botToken, cfg.chatId, text);
+  return { status: res.ok ? "sent" : "failed", ...(res.error ? { error: res.error } : {}) };
+}
+
 export async function sendTelegramAlert(
   alert: StoredAlert,
 ): Promise<{ status: "sent" | "not_configured" | "failed"; error?: string }> {

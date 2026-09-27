@@ -34,7 +34,7 @@
         "allowSymbols": [],
         "denySymbols": [],
         "lotMode": "BALANCE",
-        "lotValue": 0.01,
+        "lotValue": 1,
         "maxLot": 0,
         "minVolumeAction": "MIN",
         "reverse": false,
@@ -47,7 +47,7 @@
       "dryRun": false,
       "maxDrawdownPct": 10,
       "createdAt": "2026-09-26T20:06:50.331Z",
-      "updatedAt": "2026-09-27T16:16:17.787Z"
+      "updatedAt": "2026-09-27T16:34:24.285Z"
     }
   ]
 }

@@ -78,17 +78,27 @@ export type CopierStatus = {
 };
 
 export type CopierEvent = {
+  /** Monotonic cursor, so a follower can ask only for what it has not seen. */
+  seq?: number;
   at: number;
   linkId: string;
   linkLabel: string;
   ownerId: string | null;
+  masterLabel?: string;
+  destLabel?: string;
   kind: string;
   message: string;
   dryRun: boolean;
   symbol?: string;
+  side?: string;
   volume?: number;
+  price?: number;
+  profit?: number;
   ticket?: number;
   masterTicket?: number;
+  masterSymbol?: string;
+  masterSide?: string;
+  masterVolume?: number;
 };
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -153,8 +163,16 @@ export async function copierStatus(): Promise<CopierStatus> {
   return call<CopierStatus>("/v1/status", { method: "GET" });
 }
 
-export async function copierEvents(limit = 100): Promise<{ events: CopierEvent[] }> {
-  return call<{ events: CopierEvent[] }>(`/v1/events?limit=${limit}`, { method: "GET" });
+export async function copierEvents(
+  limit = 100,
+  since?: number,
+): Promise<{ events: CopierEvent[]; cursor?: number }> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  // 0 is a real cursor, so only an absent value means "just give me the feed".
+  if (typeof since === "number" && since >= 0) params.set("since", String(since));
+  return call<{ events: CopierEvent[]; cursor?: number }>(`/v1/events?${params}`, {
+    method: "GET",
+  });
 }
 
 export async function probeCopierAccount(accountId: string): Promise<CopierAccountSnapshot> {
