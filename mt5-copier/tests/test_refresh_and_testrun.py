@@ -234,7 +234,8 @@ def test_with_nothing_open_a_test_run_samples_a_common_instrument(setup):
     assert "symbol:XAUUSD.c" in keys
     assert result["ok"] is True
     sized = next(s for s in result["steps"] if s["key"] == "symbol:XAUUSD.c")
-    assert sized["sample"] == "common instrument"
+    assert sized["sample"].startswith("common instrument")
+    assert "0.01-lot master trade" in sized["sample"]  # a realistic size, not a full lot
 
 
 def test_a_test_run_prefers_hand_mappings_when_nothing_is_open(setup):

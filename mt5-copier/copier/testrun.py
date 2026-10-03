@@ -23,8 +23,10 @@ if TYPE_CHECKING:
 
 PASS, WARN, FAIL = "pass", "warn", "fail"
 
-# With nothing open on the master, a sample is sized as if it traded this.
-NOMINAL_MASTER_LOT = 1.0
+# With nothing open on the master, a sample is sized like the master's last
+# trade in that symbol (from the journal), or failing that, this smallest
+# common lot. A full lot would test a margin the master never actually uses.
+NOMINAL_MASTER_LOT = 0.01
 MAX_SAMPLES = 3
 # Fallback instruments to try when the master holds nothing and no symbol is
 # mapped by hand, most commonly traded first.
@@ -235,17 +237,35 @@ def _test_sample(engine, link, master, dest, cycle, sample, step) -> None:
     step(f"check:{dest_symbol}", f"Broker check · {dest_symbol}", PASS, detail)
 
 
+def _usual_volume(engine, link, symbol: str) -> float:
+    """The master's most recent size for this symbol, from the trade journal."""
+    journal = getattr(engine, "journal", None)
+    if journal is not None:
+        try:
+            for row in reversed(journal.rows()):
+                if (row.get("linkId") == link.id and row.get("kind") == "open"
+                        and str(row.get("masterSymbol") or "").upper() == symbol.upper()
+                        and row.get("masterVolume")):
+                    return float(row["masterVolume"])
+        except Exception:  # the journal is a convenience here, never a blocker
+            pass
+    return NOMINAL_MASTER_LOT
+
+
 def _pick_samples(engine, link, master) -> list[dict[str, Any]]:
     """What to test: the master's real trades first, then hand mappings, then
     a common instrument the master offers."""
     samples: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def add(symbol: str, origin: str, side: str = "BUY", volume: float = NOMINAL_MASTER_LOT,
+    def add(symbol: str, origin: str, side: str = "BUY", volume: float | None = None,
             sl: float = 0.0, tp: float = 0.0) -> bool:
         if symbol.upper() in seen or link.rules.filter_reason(symbol):
             return False
         seen.add(symbol.upper())
+        if volume is None:
+            volume = _usual_volume(engine, link, symbol)
+            origin = f"{origin} · sized like a {volume:g}-lot master trade"
         samples.append({"symbol": symbol, "side": side, "volume": float(volume),
                         "sl": float(sl or 0.0), "tp": float(tp or 0.0), "origin": origin})
         return len(samples) >= MAX_SAMPLES

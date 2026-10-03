@@ -464,3 +464,20 @@ def test_a_test_run_reports_a_limit_that_would_stop_a_copy_now(world):
     assert risk["status"] == "warn"
     assert "Trading session" in risk["detail"]
     assert state.get("L1").to_dict() == before  # a test run changes nothing
+
+
+def test_a_test_run_sizes_samples_like_the_masters_last_trade(world):
+    from copier.testrun import run_test
+
+    master, dest, engine, state, journal, make_link = world
+    link = make_link(symbol_map={"XAUUSD.c": "XAUUSD.s"})
+    ticket = master.add("XAUUSD.c", "BUY", 0.25)
+    engine.run_link(link)  # copied: the journal now knows the master trades 0.25
+    del master.positions[ticket]
+    engine.run_link(link)
+
+    result = run_test(engine, link)
+
+    sized = next(s for s in result["steps"] if s["key"] == "symbol:XAUUSD.C")
+    assert "0.25-lot master trade" in sized["sample"]
+    assert "BUY 0.25 on the master" in sized["detail"]
