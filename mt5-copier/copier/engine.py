@@ -73,6 +73,10 @@ LEDGER_STREAK_WINDOW = 7 * 86_400.0
 # used to learn the master broker's clock offset.
 MASTER_CLOCK_TOLERANCE = 120.0
 
+# A master trade that seems to execute after we saw it means this machine's
+# clock is behind the broker's. Beyond this much, latency is not reported.
+CLOCK_SKEW_TOLERANCE = 0.05
+
 # SYMBOL_TRADE_MODE_* values that forbid opening a trade in a given direction.
 _CLOSED_TRADE_MODES = {0: "disabled", 3: "set to close-only"}
 _ONE_WAY_TRADE_MODES = {1: "BUY", 2: "SELL"}
@@ -561,7 +565,7 @@ class Engine:
         rules = link.rules
         if state.risk_block:
             return ("loss_streak", "Max consecutive losses", state.risk_block,
-                    "when you arm the link again")
+                    "when you resume the link")
         daily = self._daily_loss_block(link, state)
         if daily:
             return daily
@@ -613,10 +617,16 @@ class Engine:
         limit: str,
         detail: str,
         resumes: str,
+        force: bool = False,
         **extra: Any,
     ) -> None:
-        """Report a risk limit, at most once per limit per broker day."""
-        if state.notified.get(trigger) == state.day:
+        """Report a risk limit, at most once per limit per broker day.
+
+        ``force`` is for a limit that has just switched on (a losing-streak
+        pause): that is news every time, even if the same limit fired earlier
+        in the day before somebody resumed the link.
+        """
+        if not force and state.notified.get(trigger) == state.day:
             return
         state.notified[trigger] = state.day or ""
         self._emit(
@@ -687,7 +697,7 @@ class Engine:
                                 f"(limit {rules.max_consecutive_losses})")
             self.state.save()
             self._risk_alert(link, state, "loss_streak", "Max consecutive losses",
-                             state.risk_block, "when you arm the link again")
+                             state.risk_block, "when you resume the link", force=True)
         daily = self._daily_loss_block(link, state)
         if daily:
             self._risk_alert(link, state, *daily, realized=round(ledger["realized"], 2),
@@ -820,8 +830,14 @@ class Engine:
         executed = master_position.get("executedAt")
         if isinstance(executed, (int, float)) and executed > 0:
             timing["masterExecutedAt"] = executed
-            timing["detectionMs"] = max(0, round((seen_at - executed) * 1000))
-            timing["latencyMs"] = max(0, round((filled_at - executed) * 1000))
+            if executed > seen_at + CLOCK_SKEW_TOLERANCE:
+                # We "saw" it before it happened: this machine's clock is
+                # behind the broker's, and any latency worked out across the
+                # two clocks would be wrong (it used to come out as 0 ms).
+                timing["clockSkewMs"] = round((executed - seen_at) * 1000)
+            else:
+                timing["detectionMs"] = max(0, round((seen_at - executed) * 1000))
+                timing["latencyMs"] = max(0, round((filled_at - executed) * 1000))
         return timing
 
     def _slippage_points(
@@ -988,7 +1004,15 @@ class Engine:
 
     # -- actions -----------------------------------------------------------
 
-    def _close(self, link: Link, ticket: int, *, volume: float | None = None, reason: str = "") -> bool:
+    def _close(
+        self,
+        link: Link,
+        ticket: int,
+        *,
+        volume: float | None = None,
+        reason: str = "",
+        comment: str | None = None,
+    ) -> bool:
         """Close (part of) a copy. A failing close is retried with growing
         pauses, and each distinct failure is reported once."""
         if link.dry_run:
@@ -997,7 +1021,7 @@ class Engine:
         failure = self._close_failures.get(key)
         if failure and time.time() < failure["nextTry"]:
             return False
-        args: dict[str, Any] = {"ticket": ticket, "comment": f"c{reason}"[:31],
+        args: dict[str, Any] = {"ticket": ticket, "comment": (comment or f"c{reason}")[:31],
                                 "deviation": link.rules.max_slippage_points}
         if volume is not None:
             args["volume"] = volume
@@ -1315,7 +1339,12 @@ class Engine:
                         side=dest_position.get("side"), volume=target, fromVolume=current,
                         masterVolume=master_volume, masterFromVolume=base_master,
                     )
-                    self._close(link, ticket, volume=round(current - target, 8), reason="reduce")
+                    # Some brokers give the remaining position the closing
+                    # order's comment, so it carries the copy's own tag: the
+                    # "c<master ticket>" comment is how ownership is recovered
+                    # without the state file.
+                    self._close(link, ticket, volume=round(current - target, 8), reason="reduce",
+                                comment=f"c{master_ticket}")
                     state.last_action_at = time.time()
                     continue
 
@@ -1432,9 +1461,16 @@ class Engine:
                 self._block(link, state, master_ticket, master_position, *block)
                 continue
 
+            # Like the other limits: written off and reported, not queued. A
+            # trade copied minutes later, once a slot frees, enters at a price
+            # the master never paid.
             cap = link.rules.max_open_positions
             if cap and open_count >= cap:
-                state.record_failure(master_ticket, f"destination is at its {cap}-position limit", now)
+                self._block(
+                    link, state, master_ticket, master_position,
+                    "max_open", "Max open copies", f"{open_count} of {cap} copies are open",
+                    "as soon as a copy closes",
+                )
                 continue
 
             try:
@@ -1510,12 +1546,16 @@ class Engine:
                     "deviation": link.rules.max_slippage_points,
                 }, timeout=self.order_timeout)
             except (CommandFailed, WorkerDown) as exc:
+                # Retried on a backoff; reported once per reason, so a slave
+                # out of margin does not send the same alert on every retry.
+                previous = (state.failures.get(master_ticket) or {}).get("reason")
                 state.record_failure(master_ticket, str(exc), now)
-                self._emit(
-                    link, "error",
-                    f"could not copy master #{master_ticket} ({dest_symbol} {volume}): {exc}",
-                    masterTicket=master_ticket,
-                )
+                if previous != str(exc):
+                    self._emit(
+                        link, "error",
+                        f"could not copy master #{master_ticket} ({dest_symbol} {volume}): {exc}",
+                        masterTicket=master_ticket,
+                    )
                 continue
 
             # For a market order on a hedging account the position ticket is the
@@ -1612,6 +1652,9 @@ class Engine:
                     # Risk: the broker day the counters belong to, what today
                     # looks like, and a losing-streak pause if one is on.
                     "day": state.day,
+                    # The slave broker's clock as seconds ahead of UTC (10800
+                    # = GMT+3); sessions and the daily reset run on it.
+                    "serverOffset": self._server_offsets.get(link.dest_id),
                     "tradesToday": state.trades_today,
                     "riskBlock": state.risk_block,
                     "today": _ledger_view(self._ledgers.get(link.id)),

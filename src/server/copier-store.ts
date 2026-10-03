@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { decryptBrokerPassword, getBroker, listBrokers } from "./broker-store";
 import { decryptSecret, encryptSecret } from "./crypto";
@@ -185,12 +185,27 @@ function filePath(): string {
 }
 
 let memory: FileShape | null = null;
+/** Modification time of the file `memory` was read from or written to. */
+let memoryMtimeMs = -1;
 
+function fileMtimeMs(path: string): number {
+  return statSync(path, { throwIfNoEntry: false })?.mtimeMs ?? -1;
+}
+
+/**
+ * The saved configuration. The file is the source of truth: the cached copy is
+ * used only while the file is unchanged. Holding a copy for the life of the
+ * process let a second instance of this module (a dev reload leaves the old
+ * one running the copier's re-sync timer) keep pushing stale rules, which
+ * silently undid every save within a minute.
+ */
 function readAll(): FileShape {
-  if (memory) return memory;
   const path = filePath();
-  if (!existsSync(path)) {
+  const mtime = fileMtimeMs(path);
+  if (memory && mtime === memoryMtimeMs) return memory;
+  if (mtime < 0) {
     memory = { accounts: [], links: [] };
+    memoryMtimeMs = mtime;
     return memory;
   }
   try {
@@ -199,9 +214,11 @@ function readAll(): FileShape {
     const raw = readFileSync(path, "utf8").replace(/^\uFEFF/, "");
     const parsed = JSON.parse(raw) as Partial<FileShape>;
     memory = { accounts: parsed.accounts ?? [], links: parsed.links ?? [] };
+    memoryMtimeMs = mtime;
   } catch (err) {
     console.error("[copier] could not parse", path, err);
-    memory = { accounts: [], links: [] };
+    // Keep what we had rather than pushing an empty configuration.
+    memory ??= { accounts: [], links: [] };
   }
   return memory;
 }
@@ -211,6 +228,7 @@ function writeAll(next: FileShape): void {
   const path = filePath();
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(next, null, 2), "utf8");
+  memoryMtimeMs = fileMtimeMs(path);
 }
 
 function publicAccount(row: StoredCopierAccount): PublicCopierAccount {

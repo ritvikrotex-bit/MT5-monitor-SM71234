@@ -177,6 +177,8 @@ export type CopierEvent = {
   latencyMs?: number;
   detectionMs?: number;
   executionMs?: number;
+  /** opened: set instead of latency when this machine's clock is behind the broker's. */
+  clockSkewMs?: number;
   /** opened: fill vs the master's entry, in slave points; positive is worse. */
   slippagePoints?: number;
   masterPrice?: number;

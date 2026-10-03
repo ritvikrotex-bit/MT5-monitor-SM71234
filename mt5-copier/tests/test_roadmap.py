@@ -481,3 +481,49 @@ def test_a_test_run_sizes_samples_like_the_masters_last_trade(world):
     sized = next(s for s in result["steps"] if s["key"] == "symbol:XAUUSD.C")
     assert "0.25-lot master trade" in sized["sample"]
     assert "BUY 0.25 on the master" in sized["detail"]
+
+
+def test_a_clock_behind_the_broker_is_not_reported_as_zero_latency(world):
+    master, dest, engine, state, journal, make_link = world
+    link = make_link()
+    master.server_offset = 0.0
+    ticket = master.add("XAUUSD.c", "BUY", 0.10)
+    # The broker says it executed 1.4 s from now: our clock is behind.
+    master.positions[ticket]["openedAtMsc"] = int((time.time() + 1.4) * 1000)
+
+    engine.run_link(link)
+
+    opened = last(engine, "opened")
+    assert "latencyMs" not in opened and "detectionMs" not in opened
+    assert 1300 <= opened["clockSkewMs"] <= 1500
+    assert opened["executionMs"] >= 0
+
+
+def test_a_partial_close_keeps_the_copys_ownership_comment(world):
+    master, dest, engine, state, journal, make_link = world
+    link = make_link()
+    ticket = master.add("XAUUSD.c", "BUY", 0.20)
+    engine.run_link(link)
+    master.positions[ticket]["volume"] = 0.10
+    engine.run_link(link)
+
+    [close_args] = [args for name, args in dest.calls if name == "close"]
+    assert close_args["comment"] == f"c{ticket}"
+
+
+def test_a_second_losing_streak_after_resuming_alerts_again(world):
+    master, dest, engine, state, journal, make_link = world
+    now = time.time()
+    dest.deals = [_deal(i, -1.0, at=now - 900 + i) for i in range(1, 3)]
+    link = make_link(max_consecutive_losses=2)
+    assert kinds(engine).count("risk") == 1
+
+    engine.arm("L1")  # Resume
+    later = time.time() + 1
+    dest.deals += [_deal(10 + i, -1.0, at=later + i) for i in range(2)]
+    engine._ledgers.clear()  # new deals arrive with the next refresh
+    for _ in range(2):
+        engine.run_link(link)
+
+    assert state.get("L1").risk_block
+    assert kinds(engine).count("risk") == 2  # the new pause is reported too

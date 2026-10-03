@@ -120,12 +120,24 @@ function speedLines(event: CopierEvent): string | null {
     lines.push(`⚡ <b>Latency:</b> ${event.latencyMs} ms${parts}`);
   } else if (typeof event.executionMs === "number") {
     lines.push(`⚡ <b>Fill time:</b> ${event.executionMs} ms`);
+    if (typeof event.clockSkewMs === "number") {
+      lines.push(
+        `<i>Latency not measured: this computer's clock is ${(event.clockSkewMs / 1000).toFixed(1)} s ` +
+          `behind the broker's. Sync its clock to measure it.</i>`,
+      );
+    }
   }
   if (typeof event.slippagePoints === "number") {
     const s = event.slippagePoints;
     const note =
       s > 0 ? "worse than the master" : s < 0 ? "better than the master" : "same as the master";
-    lines.push(`📐 <b>Slippage:</b> ${s > 0 ? "+" : ""}${s} pts (${note})`);
+    // Points alone read alarming on instruments priced in the tens of
+    // thousands; the price gap says what it actually cost.
+    const gap =
+      typeof event.price === "number" && typeof event.masterPrice === "number"
+        ? ` · ${Math.abs(event.price - event.masterPrice).toFixed(2)} in price`
+        : "";
+    lines.push(`📐 <b>Slippage:</b> ${s > 0 ? "+" : ""}${s} pts${gap} (${note})`);
   }
   return lines.length ? lines.join("\n") : null;
 }
