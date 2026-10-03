@@ -504,9 +504,12 @@ function CopierPage() {
                   onProbe={() =>
                     run(`probe-${account.id}`, async () => {
                       try {
-                        const snap = await api<Snapshot>(`/api/copier/accounts/${account.id}/probe`, {
-                          method: "POST",
-                        });
+                        const snap = await api<Snapshot>(
+                          `/api/copier/accounts/${account.id}/probe`,
+                          {
+                            method: "POST",
+                          },
+                        );
                         setProbe((p) => ({ ...p, [account.id]: snap }));
                       } catch (e) {
                         setProbe((p) => ({
@@ -1409,7 +1412,11 @@ function AccountForm({
           </select>
         </Field>
       </div>
-      <FormButtons busy={busy} onCancel={onCancel} submitLabel={initial ? "Update account" : "Save account"} />
+      <FormButtons
+        busy={busy}
+        onCancel={onCancel}
+        submitLabel={initial ? "Update account" : "Save account"}
+      />
     </form>
   );
 }

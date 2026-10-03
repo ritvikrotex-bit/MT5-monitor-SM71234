@@ -22,9 +22,12 @@ import json
 import logging
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import MetaTrader5 as mt5  # type: ignore
+
+from copier import terminals
 
 log = logging.getLogger("copier.worker")
 
@@ -94,6 +97,8 @@ class Terminal:
         self._disconnected_since: float | None = None
         self._offset: float | None = None
         self._offset_at = 0.0
+        self._started = time.time()
+        self._cleared_stale = False
 
     def server_offset(self) -> float | None:
         """Seconds the broker's clock runs ahead of UTC (e.g. 10800 for GMT+3).
@@ -143,11 +148,23 @@ class Terminal:
             code = error[0] if isinstance(error, tuple) else None
             if code not in RETRY_CONNECT_CODES:
                 break  # bad password or unknown server: retrying will not help
+            if not self._cleared_stale:
+                self._cleared_stale = True
+                stopped = terminals.stop_stale(Path(self.terminal), started_before=self._started)
+                if stopped:
+                    log.warning("closed leftover terminal(s) %s that blocked the connection", stopped)
+                    continue  # retry at once against a fresh terminal
             if attempt < CONNECT_ATTEMPTS - 1:
                 log.warning("terminal not ready yet (%s); retrying", error)
                 time.sleep(5 * (attempt + 1))
         if not ok:
-            raise WorkerError("CONNECT_FAILED", f"initialize failed: {error}")
+            message = f"initialize failed: {error}"
+            if code in RETRY_CONNECT_CODES:
+                message += (
+                    ": the MT5 terminal did not answer. Open it once on the server to clear"
+                    " any update or login prompt, close it, then restart the copier"
+                )
+            raise WorkerError("CONNECT_FAILED", message)
         info = mt5.account_info()
         if info is None:
             raise WorkerError("CONNECT_FAILED", f"account_info failed: {mt5.last_error()}")

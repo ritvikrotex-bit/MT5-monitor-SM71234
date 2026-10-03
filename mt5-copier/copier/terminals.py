@@ -211,6 +211,65 @@ def provision(server: str, login: int, *, root: Path, source: Path | None = None
     return exe
 
 
+_LIST_TERMINALS = (
+    "Get-CimInstance Win32_Process -Filter \"Name='terminal64.exe'\" | ForEach-Object { "
+    "'{0}|{1}|{2}' -f $_.ProcessId, "
+    "([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds(), $_.ExecutablePath }"
+)
+
+
+def parse_terminal_list(output: str, exe: Path) -> list[tuple[int, float]]:
+    """(pid, start time in epoch seconds) of each listed process running ``exe``."""
+    target = os.path.normcase(os.path.abspath(exe))
+    found: list[tuple[int, float]] = []
+    for line in output.splitlines():
+        parts = line.strip().split("|", 2)
+        if len(parts) != 3 or not parts[2]:
+            continue  # no path: a process we may not inspect
+        try:
+            pid, started_ms = int(parts[0]), float(parts[1])
+        except ValueError:
+            continue
+        if os.path.normcase(os.path.abspath(parts[2])) == target:
+            found.append((pid, started_ms / 1000.0))
+    return found
+
+
+def running_from(exe: Path) -> list[tuple[int, float]]:
+    """Every running terminal started from ``exe``, in any Windows session."""
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", _LIST_TERMINALS],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("could not list running terminals: %s", exc)
+        return []
+    return parse_terminal_list(result.stdout, exe)
+
+
+def stop_stale(exe: Path, *, started_before: float) -> list[int]:
+    """Close terminals from this account's folder that a previous copier run left behind.
+
+    Stopping a worker does not stop its terminal, and an orphan (or one opened by
+    hand in another Windows session) answers our IPC with a timeout. Anything
+    started after ``started_before`` was launched by the current worker and is kept.
+    """
+    stopped: list[int] = []
+    for pid, started in running_from(exe):
+        if started >= started_before - 1.0:
+            continue
+        try:
+            os.kill(pid, 15)  # TerminateProcess on Windows
+            stopped.append(pid)
+        except OSError as exc:
+            log.warning("could not close leftover terminal %s: %s", pid, exc)
+    return stopped
+
+
 def launch(exe: Path) -> subprocess.Popen:
     """Start a portable terminal detached from our console."""
     flags = 0

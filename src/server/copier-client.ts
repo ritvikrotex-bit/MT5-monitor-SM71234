@@ -227,7 +227,18 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
         ...(init?.headers ?? {}),
       },
     });
-  } catch {
+  } catch (err) {
+    // Node's fetch gives up on a silent server after ~5 minutes; the copier is
+    // up but busy, typically starting an account's MT5 terminal.
+    const cause = (err as { cause?: { code?: string } } | null)?.cause?.code;
+    if (cause === "UND_ERR_HEADERS_TIMEOUT" || cause === "UND_ERR_BODY_TIMEOUT") {
+      throw new ApiError(
+        "COPIER_TIMEOUT",
+        "The trade copier is running but did not answer in time. It is probably still starting " +
+          "this account's MT5 terminal; check the account's status in a minute.",
+        504,
+      );
+    }
     throw new ApiError(
       "COPIER_UNAVAILABLE",
       "The trade copier service is unreachable. Start the MT5MonitorCopier Windows service.",
