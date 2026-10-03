@@ -456,9 +456,6 @@ function CopierPage() {
           </div>
         </Card>
 
-        {/* ---------------- journal ---------------- */}
-        {links.length > 0 && <TradeJournal />}
-
         {/* ---------------- accounts ---------------- */}
         <Card
           title="MT5 accounts"
@@ -531,6 +528,9 @@ function CopierPage() {
             ))}
           </div>
         </Card>
+
+        {/* ---------------- journal ---------------- */}
+        {links.length > 0 && <TradeJournal />}
 
         {/* ---------------- activity ---------------- */}
         <Card title="Recent activity">

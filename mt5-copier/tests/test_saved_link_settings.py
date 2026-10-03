@@ -68,18 +68,31 @@ def set_profit(slave: FakeAccount, profit: float) -> None:
 
 # -- copying -----------------------------------------------------------------
 
-def test_equity_scaling_and_symbol_mapping(live):
-    """0.01 on the master -> 0.03 on the slave (equity ratio 3.29, rounded down),
-    and the .c symbols land on the hand-mapped .r ones."""
+def _expected_vol(rules, master_vol: float) -> float:
+    """Slave volume the engine should produce for a given master volume, using saved rules."""
+    from test_engine import SPEC
+    raw = rules.scale_volume(
+        master_vol,
+        master_balance=MASTER_EQUITY,
+        dest_balance=SLAVE_EQUITY,
+        master_equity=MASTER_EQUITY,
+        dest_equity=SLAVE_EQUITY,
+    )
+    return rules.round_volume(raw, SPEC)
+
+
+def test_lot_sizing_and_symbol_mapping(live):
+    """The saved lot mode copies the right size and maps .c symbols to .r ones."""
     master, slave, engine, state, journal, rules, make = live
     link = make()
     master.add("BTCUSD.c", "BUY", 0.01)
     master.add("XAUUSD.c", "SELL", 0.01)
     engine.run_link(link)
 
+    ev = _expected_vol(rules, 0.01)
     assert [(p["symbol"], p["side"], p["volume"]) for p in copies(slave)] == [
-        ("BTCUSD.r", "BUY", pytest.approx(0.03)),
-        ("XAUUSD.r", "SELL", pytest.approx(0.03)),
+        ("BTCUSD.r", "BUY", pytest.approx(ev)),
+        ("XAUUSD.r", "SELL", pytest.approx(ev)),
     ]
 
 
@@ -111,12 +124,14 @@ def test_a_master_close_closes_the_copy_and_is_journaled(live):
 def test_a_partial_close_shrinks_the_copy_by_the_same_share(live):
     master, slave, engine, state, journal, rules, make = live
     link = make()
-    ticket = master.add("BTCUSD.c", "BUY", 0.02)  # -> 0.06 on the slave
+    ev = _expected_vol(rules, 0.02)
+    ticket = master.add("BTCUSD.c", "BUY", 0.02)
     engine.run_link(link)
+    assert copies(slave)[0]["volume"] == pytest.approx(ev)
+
     master.positions[ticket]["volume"] = 0.01      # master closes half
     engine.run_link(link)
-
-    assert copies(slave)[0]["volume"] == pytest.approx(0.03)
+    assert copies(slave)[0]["volume"] == pytest.approx(ev / 2)
 
 
 def test_an_equity_drift_does_not_trim_a_copy(live):
@@ -124,10 +139,11 @@ def test_an_equity_drift_does_not_trim_a_copy(live):
     link = make()
     master.add("BTCUSD.c", "BUY", 0.01)
     engine.run_link(link)
-    master.equity *= 1.4  # ratio now says 0.02, but the master did nothing
+    ev = _expected_vol(rules, 0.01)
+    master.equity *= 1.4  # account changed, but the master position did nothing
     engine.run_link(link)
 
-    assert copies(slave)[0]["volume"] == pytest.approx(0.03)
+    assert copies(slave)[0]["volume"] == pytest.approx(ev)
 
 
 # -- risk limits -------------------------------------------------------------
@@ -153,30 +169,37 @@ def test_max_open_copies(live):
 
 def test_max_sell_exposure(live):
     master, slave, engine, state, journal, rules, make = live
-    assert rules.max_sell_lots == pytest.approx(0.03)
+    limit = rules.max_sell_lots
+    assert limit == pytest.approx(0.03)
     link = make()
-    master.add("BTCUSD.c", "SELL", 0.01)  # 0.03: exactly at the limit, allowed
-    master.add("XAUUSD.c", "SELL", 0.01)  # would make 0.06
+    # SELL 0.03: slave gets 0.03 — exactly at the limit, still allowed
+    master.add("BTCUSD.c", "SELL", 0.03)
     engine.run_link(link)
-
     assert [(p["side"], p["volume"]) for p in copies(slave)] == [("SELL", pytest.approx(0.03))]
+
+    # SELL another 0.01: total would be 0.04 > 0.03 limit, blocked
+    master.add("XAUUSD.c", "SELL", 0.01)
+    engine.run_link(link)
+    assert len(copies(slave)) == 1
     risk = last(engine, "risk")
     assert risk["trigger"] == "exposure_sell"
-    assert "0.03 + 0.03 lots would exceed the 0.03-lot limit" in risk["detail"]
+    assert "0.03 + 0.01 lots would exceed the 0.03-lot limit" in risk["detail"]
 
 
 def test_max_buy_exposure(live):
     master, slave, engine, state, journal, rules, make = live
     assert rules.max_buy_lots == pytest.approx(1.0)
     link = make()
-    master.add("BTCUSD.c", "BUY", 0.31)  # 0.31 x 3.29 = 1.02 lots > 1
+    # BUY 1.01: slave gets 1.01 > 1.0 limit, blocked
+    master.add("BTCUSD.c", "BUY", 1.01)
     engine.run_link(link)
     assert copies(slave) == []
     assert last(engine, "risk")["trigger"] == "exposure_buy"
 
-    master.add("XAUUSD.c", "BUY", 0.30)  # 0.98 lots, fits
+    # BUY 1.00: slave gets 1.00 = limit, allowed (check is strictly greater)
+    master.add("XAUUSD.c", "BUY", 1.00)
     engine.run_link(link)
-    assert [p["volume"] for p in copies(slave)] == [pytest.approx(0.98)]
+    assert [p["volume"] for p in copies(slave)] == [pytest.approx(1.00)]
 
 
 def test_max_trades_per_day(live):
