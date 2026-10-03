@@ -206,6 +206,7 @@ function CopierPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [addingAccount, setAddingAccount] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<string | null>(null);
   const [addingLink, setAddingLink] = useState(false);
   const [editingLink, setEditingLink] = useState<string | null>(null);
   const [probe, setProbe] = useState<Record<string, Snapshot | string>>({});
@@ -494,37 +495,61 @@ function CopierPage() {
               <Empty>No accounts yet. Add the account you want trades copied onto.</Empty>
             )}
             {accounts.map((account) => (
-              <AccountRow
-                key={account.id}
-                account={account}
-                result={probe[account.id]}
-                worker={workers[account.id]}
-                busy={busy}
-                onProbe={() =>
-                  run(`probe-${account.id}`, async () => {
-                    try {
-                      const snap = await api<Snapshot>(`/api/copier/accounts/${account.id}/probe`, {
-                        method: "POST",
-                      });
-                      setProbe((p) => ({ ...p, [account.id]: snap }));
-                    } catch (e) {
-                      setProbe((p) => ({
-                        ...p,
-                        [account.id]: e instanceof Error ? e.message : "Could not connect.",
-                      }));
-                      throw e;
+              <div key={account.id}>
+                <AccountRow
+                  account={account}
+                  result={probe[account.id]}
+                  worker={workers[account.id]}
+                  busy={busy}
+                  onProbe={() =>
+                    run(`probe-${account.id}`, async () => {
+                      try {
+                        const snap = await api<Snapshot>(`/api/copier/accounts/${account.id}/probe`, {
+                          method: "POST",
+                        });
+                        setProbe((p) => ({ ...p, [account.id]: snap }));
+                      } catch (e) {
+                        setProbe((p) => ({
+                          ...p,
+                          [account.id]: e instanceof Error ? e.message : "Could not connect.",
+                        }));
+                        throw e;
+                      }
+                    })
+                  }
+                  onEdit={() =>
+                    setEditingAccount((prev) => (prev === account.id ? null : account.id))
+                  }
+                  onDelete={() => {
+                    if (!confirm(`Remove ${account.label}?`)) return;
+                    void run(
+                      `del-${account.id}`,
+                      () => api(`/api/copier/accounts/${account.id}`, { method: "DELETE" }),
+                      "Account removed.",
+                    );
+                  }}
+                />
+                {editingAccount === account.id && (
+                  <AccountForm
+                    initial={account}
+                    busy={busy === `edit-${account.id}`}
+                    onCancel={() => setEditingAccount(null)}
+                    onSave={(body) =>
+                      run(
+                        `edit-${account.id}`,
+                        async () => {
+                          await api(`/api/copier/accounts/${account.id}`, {
+                            method: "PATCH",
+                            body: JSON.stringify(body),
+                          });
+                          setEditingAccount(null);
+                        },
+                        "Account updated.",
+                      )
                     }
-                  })
-                }
-                onDelete={() => {
-                  if (!confirm(`Remove ${account.label}?`)) return;
-                  void run(
-                    `del-${account.id}`,
-                    () => api(`/api/copier/accounts/${account.id}`, { method: "DELETE" }),
-                    "Account removed.",
-                  );
-                }}
-              />
+                  />
+                )}
+              </div>
             ))}
           </div>
         </Card>
@@ -758,6 +783,7 @@ function AccountRow({
   worker,
   busy,
   onProbe,
+  onEdit,
   onDelete,
 }: {
   account: Account;
@@ -765,6 +791,7 @@ function AccountRow({
   worker: WorkerStatus | undefined;
   busy: string | null;
   onProbe: () => void;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   const restarts = Math.max(0, (worker?.starts ?? 0) - 1);
@@ -817,6 +844,13 @@ function AccountRow({
             className="rounded-lg border border-border px-2.5 py-1 text-xs font-medium whitespace-nowrap hover:bg-secondary disabled:opacity-50"
           >
             {busy === `probe-${account.id}` ? "Checking..." : "Test login"}
+          </button>
+          <button
+            onClick={onEdit}
+            className="grid size-7 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-secondary"
+            aria-label={`Edit ${account.label}`}
+          >
+            <Settings2 className="size-3.5" />
           </button>
           <button
             onClick={onDelete}
@@ -1280,21 +1314,23 @@ function FormButtons({
 }
 
 function AccountForm({
+  initial,
   onSave,
   onCancel,
   busy,
 }: {
+  initial?: Account;
   onSave: (body: Record<string, unknown>) => void;
   onCancel: () => void;
   busy: boolean;
 }) {
   const [form, setForm] = useState({
-    label: "",
-    broker: "",
-    server: "",
-    login: "",
+    label: initial?.label ?? "",
+    broker: initial?.broker ?? "",
+    server: initial?.server ?? "",
+    login: initial ? String(initial.login) : "",
     password: "",
-    role: "DESTINATION" as Role,
+    role: (initial?.role ?? "DESTINATION") as Role,
   });
   const set =
     (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -1350,14 +1386,19 @@ function AccountForm({
         </Field>
         <Field
           label="Password"
-          hint="A destination needs the trading password. A master read by login only needs its investor password."
+          hint={
+            initial
+              ? "Leave blank to keep the current password."
+              : "A destination needs the trading password. A master read by login only needs its investor password."
+          }
         >
           <input
-            required
+            required={!initial}
             type="password"
             className={inputClass}
             value={form.password}
             onChange={set("password")}
+            placeholder={initial ? "Leave blank to keep unchanged" : ""}
           />
         </Field>
         <Field label="Use as" hint="A master-only account is kept out of every destination picker.">
@@ -1368,7 +1409,7 @@ function AccountForm({
           </select>
         </Field>
       </div>
-      <FormButtons busy={busy} onCancel={onCancel} submitLabel="Save account" />
+      <FormButtons busy={busy} onCancel={onCancel} submitLabel={initial ? "Update account" : "Save account"} />
     </form>
   );
 }
