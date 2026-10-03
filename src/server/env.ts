@@ -29,6 +29,18 @@ export function monitorPollIntervalMs(): number {
   );
 }
 
+/**
+ * Whether this instance watches monitored clients and sends their alerts.
+ *
+ * On by default. Two instances watching the same clients (the server and a
+ * copy run locally for development) each send every alert, so the second one
+ * is started with MONITOR_CLIENT_ALERTS=off. Set it in the process environment,
+ * not in the committed .env, or the server would stop alerting too.
+ */
+export function clientAlertsEnabled(): boolean {
+  return !/^(off|false|0|no)$/i.test(envOptional("MONITOR_CLIENT_ALERTS", "on").trim());
+}
+
 export const copierUrl = () =>
   envOptional("MT5_COPIER_URL", "http://127.0.0.1:8766").replace(/\/$/, "");
 

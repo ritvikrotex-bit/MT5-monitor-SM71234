@@ -132,118 +132,178 @@ export async function deleteTelegramConfig(userId: string): Promise<boolean> {
   return true;
 }
 
+// -- message formatting -----------------------------------------------------
+//
+// Alerts are sent in Telegram's HTML mode so headings can be bold and tickets
+// monospace. Anything that came from outside (client names, labels, symbols)
+// goes through esc(), and a message Telegram still refuses to parse is resent
+// as plain text, so a formatting slip can never cost the alert itself.
+
+/** Telegram's HTML mode needs only these three escaped. */
+export const esc = (value: unknown): string =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+const htmlToPlain = (html: string): string =>
+  html
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+
+/** Short enough not to wrap on a phone. */
+export const DIVIDER = "━━━━━━━━━━━━━━━━";
+
+export function alertTime(at: Date): string {
+  return at.toLocaleString("en-US", { dateStyle: "short", timeStyle: "medium" });
+}
+
+export const signedMoney = (value: number, symbol = "$"): string =>
+  `${value >= 0 ? "+" : "-"}${symbol}${Math.abs(value).toFixed(2)}`;
+
+/** Separate blocks with one blank line, skipping empty ones. */
+export const blocks = (...parts: (string | false | null | undefined)[]): string =>
+  parts.filter((part): part is string => Boolean(part)).join("\n\n");
+
 function formatPrice(val: number | null | undefined): string {
-  if (val == null) return "—";
+  if (val == null || val === 0) return "—";
   return String(val);
+}
+
+const field = (label: string, value: string) => `<b>${label}:</b> ${value}`;
+const change = (from: number | null | undefined, to: number | null | undefined) =>
+  `${formatPrice(from)} → ${formatPrice(to)}`;
+
+/** Green for profit, red for loss — and a party popper for a win. */
+function closeOutcome(profit: number): { icon: string; label: string; line: string } {
+  if (profit > 0)
+    return { icon: "🎉", label: "in Profit", line: `💰 <b>Profit: ${signedMoney(profit)}</b>` };
+  if (profit < 0) return { icon: "🔴", label: "", line: `🔻 <b>Loss: ${signedMoney(profit)}</b>` };
+  return { icon: "🔴", label: "", line: `⚖️ <b>P/L: ${signedMoney(profit)}</b>` };
 }
 
 export function formatAlertMessage(alert: StoredAlert): string {
   const p = alert.position;
-  const brokerLine = alert.brokerName ? `Broker: ${alert.brokerName}\n` : "";
-  const time = new Date(alert.createdAt).toLocaleString("en-US", {
-    dateStyle: "short",
-    timeStyle: "medium",
-  });
+  const head = (icon: string, title: string) => `${icon} <b>${esc(title)}</b>\n${DIVIDER}`;
+  const client = [
+    field("Client", esc(alert.clientName)),
+    field("Login", `<code>${esc(alert.clientLogin)}</code>`),
+    ...(alert.brokerName ? [field("Broker", esc(alert.brokerName))] : []),
+  ].join("\n");
+  const trade = (...rows: string[]) =>
+    [
+      `📊 <b>${esc(p.symbol)} · ${p.direction} ${p.volume.toFixed(2)} lots</b>`,
+      field("Position", `<code>#${esc(p.positionId)}</code>`),
+      ...rows,
+    ].join("\n");
+  const footer = `🕒 ${esc(alertTime(new Date(alert.createdAt)))}`;
 
-  if (alert.type === "new_position") {
-    return (
-      `🟢 New Position\n\n` +
-      `Client: ${alert.clientName}\n` +
-      `Login: ${alert.clientLogin}\n` +
-      brokerLine +
-      `\n` +
-      `Position: #${p.positionId}\n` +
-      `Symbol: ${p.symbol}\n` +
-      `Direction: ${p.direction}\n` +
-      `Volume: ${p.volume.toFixed(2)} lots\n` +
-      `Open Price: ${formatPrice(p.openPrice)}\n` +
-      `SL: ${formatPrice(p.sl)}\n` +
-      `TP: ${formatPrice(p.tp)}\n\n` +
-      `Time: ${time}`
-    );
+  switch (alert.type) {
+    case "new_position":
+      return blocks(
+        head("🟢", "New Position"),
+        client,
+        trade(
+          field("Open price", formatPrice(p.openPrice)),
+          field("Stop loss", formatPrice(p.sl)),
+          field("Take profit", formatPrice(p.tp)),
+        ),
+        footer,
+      );
+
+    case "position_closed": {
+      const outcome = closeOutcome(p.profit);
+      return blocks(
+        head(outcome.icon, `Position Closed ${outcome.label}`.trim()),
+        client,
+        trade(
+          field("Open price", formatPrice(p.openPrice)),
+          ...(p.currentPrice != null ? [field("Close price", formatPrice(p.currentPrice))] : []),
+        ),
+        outcome.line,
+        footer,
+      );
+    }
+
+    case "sl_modified":
+      return blocks(
+        head("🟡", "Stop Loss Modified"),
+        client,
+        trade(field("Stop loss", change(alert.from, alert.to))),
+        footer,
+      );
+
+    case "tp_modified":
+      return blocks(
+        head("🟡", "Take Profit Modified"),
+        client,
+        trade(field("Take profit", change(alert.from, alert.to))),
+        footer,
+      );
+
+    default: {
+      // position_modified: a volume change, or several fields at once. Older
+      // records only carry from/to, which always meant volume.
+      const changes =
+        alert.changes ??
+        (alert.from !== undefined && alert.to !== undefined
+          ? { volume: { from: alert.from ?? null, to: alert.to ?? null } }
+          : {});
+      const rows = [
+        ...(changes.volume
+          ? [field("Volume", `${change(changes.volume.from, changes.volume.to)} lots`)]
+          : []),
+        ...(changes.sl ? [field("Stop loss", change(changes.sl.from, changes.sl.to))] : []),
+        ...(changes.tp ? [field("Take profit", change(changes.tp.from, changes.tp.to))] : []),
+      ];
+      const title =
+        changes.sl && changes.tp && !changes.volume
+          ? "Stop Loss & Take Profit Modified"
+          : "Position Modified";
+      return blocks(
+        head("🟡", title),
+        client,
+        trade(
+          ...rows,
+          field("Current price", formatPrice(p.currentPrice)),
+          field("P/L", signedMoney(p.profit)),
+        ),
+        footer,
+      );
+    }
   }
-
-  if (alert.type === "position_closed") {
-    const profitSign =
-      p.profit >= 0 ? `+$${p.profit.toFixed(2)}` : `-$${Math.abs(p.profit).toFixed(2)}`;
-    return (
-      `🔴 Position Closed\n\n` +
-      `Client: ${alert.clientName}\n` +
-      `Login: ${alert.clientLogin}\n` +
-      brokerLine +
-      `\n` +
-      `Position: #${p.positionId}\n` +
-      `Symbol: ${p.symbol}\n` +
-      `Direction: ${p.direction}\n` +
-      `Volume: ${p.volume.toFixed(2)} lots\n` +
-      `Open Price: ${formatPrice(p.openPrice)}\n` +
-      (p.currentPrice != null ? `Close Price: ${formatPrice(p.currentPrice)}\n` : "") +
-      `Profit: ${profitSign}\n\n` +
-      `Time: ${time}`
-    );
-  }
-
-  if (alert.type === "sl_modified") {
-    return (
-      `🟡 Stop Loss Modified\n\n` +
-      `Client: ${alert.clientName}\n` +
-      `Login: ${alert.clientLogin}\n` +
-      brokerLine +
-      `\n` +
-      `Position: #${p.positionId}\n` +
-      `Symbol: ${p.symbol}\n` +
-      `Direction: ${p.direction}\n` +
-      `SL: ${formatPrice(alert.from)} → ${formatPrice(alert.to)}\n\n` +
-      `Time: ${time}`
-    );
-  }
-
-  if (alert.type === "tp_modified") {
-    return (
-      `🟡 Take Profit Modified\n\n` +
-      `Client: ${alert.clientName}\n` +
-      `Login: ${alert.clientLogin}\n` +
-      brokerLine +
-      `\n` +
-      `Position: #${p.positionId}\n` +
-      `Symbol: ${p.symbol}\n` +
-      `Direction: ${p.direction}\n` +
-      `TP: ${formatPrice(alert.from)} → ${formatPrice(alert.to)}\n\n` +
-      `Time: ${time}`
-    );
-  }
-
-  // position_modified (volume or general modification)
-  const changeDetail =
-    alert.from !== undefined && alert.to !== undefined
-      ? `Volume: ${formatPrice(alert.from)} → ${formatPrice(alert.to)} lots\n`
-      : "";
-  return (
-    `🟡 Position Modified\n\n` +
-    `Client: ${alert.clientName}\n` +
-    `Login: ${alert.clientLogin}\n` +
-    brokerLine +
-    `\n` +
-    `Position: #${p.positionId}\n` +
-    `Symbol: ${p.symbol}\n` +
-    `Direction: ${p.direction}\n` +
-    changeDetail +
-    `Current Price: ${formatPrice(p.currentPrice)}\n` +
-    `P/L: $${p.profit.toFixed(2)}\n\n` +
-    `Time: ${time}`
-  );
 }
 
 async function postMessage(
   botToken: string,
   chatId: string,
   text: string,
+  html = false,
+): Promise<{ ok: boolean; error?: string }> {
+  const first = await sendOnce(botToken, chatId, text, html);
+  if (first.ok || !html || !/pars|entit/i.test(first.error ?? "")) return first;
+  console.warn("[Telegram] Formatted message was rejected; resending as plain text.");
+  return sendOnce(botToken, chatId, htmlToPlain(text), false);
+}
+
+async function sendOnce(
+  botToken: string,
+  chatId: string,
+  text: string,
+  html: boolean,
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const response = await fetch(`${apiBase()}/bot${botToken}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        disable_web_page_preview: true,
+        ...(html ? { parse_mode: "HTML" } : {}),
+      }),
       signal: AbortSignal.timeout(10_000),
     });
 
@@ -295,10 +355,11 @@ export async function sendTelegramTestMessage(
 export async function sendTelegramText(
   userId: string,
   text: string,
+  options: { html?: boolean } = {},
 ): Promise<{ status: "sent" | "not_configured" | "failed"; error?: string }> {
   const cfg = await getTelegramConfig(userId);
   if (!cfg) return { status: "not_configured" };
-  const res = await postMessage(cfg.botToken, cfg.chatId, text);
+  const res = await postMessage(cfg.botToken, cfg.chatId, text, options.html ?? false);
   return { status: res.ok ? "sent" : "failed", ...(res.error ? { error: res.error } : {}) };
 }
 
@@ -307,7 +368,7 @@ export async function sendTelegramAlert(
 ): Promise<{ status: "sent" | "not_configured" | "failed"; error?: string }> {
   const cfg = await getTelegramConfig(alert.userId);
   if (!cfg) return { status: "not_configured" };
-  const res = await postMessage(cfg.botToken, cfg.chatId, formatAlertMessage(alert));
+  const res = await postMessage(cfg.botToken, cfg.chatId, formatAlertMessage(alert), true);
   return {
     status: res.ok ? "sent" : "failed",
     ...(res.error ? { error: res.error } : {}),

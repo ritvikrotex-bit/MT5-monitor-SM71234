@@ -6,6 +6,7 @@ import { EmptyState, ReadOnlyBadge } from "@/components/mt5/primitives";
 import { brokerName, store, useAppState } from "@/lib/app-store";
 import {
   ago,
+  describeChanges,
   notificationMeta,
   price,
   signedMoney,
@@ -126,8 +127,13 @@ function NotificationDetail() {
           {n.price !== undefined && <Item label="Price" value={price(n.price)} />}
           {n.sl !== undefined && n.sl !== null && <Item label="Stop loss" value={price(n.sl)} />}
           {n.tp !== undefined && n.tp !== null && <Item label="Take profit" value={price(n.tp)} />}
-          {n.from !== undefined && n.to !== undefined && (
-            <Item label="Change" value={`${price(n.from)} → ${price(n.to)}`} />
+          {describeChanges(n.changes) ? (
+            <Item label="Changes" value={describeChanges(n.changes)!} />
+          ) : (
+            n.from !== undefined &&
+            n.to !== undefined && (
+              <Item label="Change" value={`${price(n.from)} → ${price(n.to)}`} />
+            )
           )}
           {n.pl !== undefined && <Item label="Realized P/L" value={signedMoney(n.pl)} />}
           <Item label="Time" value={`${n.time} · ${n.day}`} />

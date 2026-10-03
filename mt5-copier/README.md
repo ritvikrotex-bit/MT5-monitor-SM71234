@@ -56,18 +56,37 @@ A **link** is one master → one destination, with its own rules:
 
 | Rule | What it does |
 | --- | --- |
-| `lotMode` | `FIXED`, `MULTIPLIER`, `BALANCE` or `EQUITY` |
-| `lotValue` | the fixed lot, or the factor applied to the scaled volume |
+| `lotMode` | `FIXED`, `MULTIPLIER`, `BALANCE`, `EQUITY`, `EQUITY_STEP` or `RISK_PERCENT` |
+| `lotValue` | the fixed lot, the factor applied to the scaled volume, lots per `equityStep` (`EQUITY_STEP`), or % of equity lost at the master's SL (`RISK_PERCENT`) |
+| `equityStep` | `EQUITY_STEP`: `lotValue` lots per this much slave equity, whole steps ($1,000 → 0.01) |
 | `maxLot` | hard cap per order |
 | `minVolumeAction` | `SKIP` or `MIN` when the scaled lot is under the symbol minimum |
 | `symbolMap` / `symbolSuffix` | explicit or suffix-based symbol translation |
 | `allowSymbols` / `denySymbols` | base-name filters |
 | `reverse` | copy in the opposite direction (stops are dropped) |
-| `copySlTp` | mirror stop loss and take profit |
+| `copySl` / `copyTp` | mirror the master's stop loss / take profit, each on its own (an old `copySlTp` sets both) |
 | `copyExisting` | copy positions already open when the link starts (off by default) |
 | `maxOpenPositions` | cap on positions the link may hold |
+| `maxTradesPerDay` | copies per broker day |
+| `maxBuyLots` / `maxSellLots` | lots the link may hold per direction |
+| `sessionStart` / `sessionEnd` / `sessionDays` | hours (HH:MM) and weekdays (0 = Monday) copying is allowed; an end before the start runs overnight |
+| `maxDailyLoss` | realized + floating P/L of the link's copies since broker midnight |
+| `maxConsecutiveLosses` | pause after this many losing copies in a row, until re-armed |
+| `maxLossPerTrade` | close a copy on the slave when its loss reaches this (not re-copied) |
+| `exitMode` | `MASTER` (follow the master's SL/TP) or `TRAILING` (the slave trails its own profit) |
+| `trailActivation` / `trailDrawdownPct` | `TRAILING`: start once profit reaches this; exit at `peak × (1 − drawdown%)` |
 | `maxDrawdownPct` | flatten and halt if destination equity falls this far |
 | `dryRun` | log every decision, send nothing |
+
+Days and hours are the slave broker's server time (what its MT5 charts show); the worker reads that clock off
+its newest quote. When a risk limit trips, the trade is written off rather than copied late, open copies stay
+managed, and the limit is reported once per broker day (`risk` event). Partial closes shrink a copy by the
+share the master closed, measured against the sizes recorded when it was copied, so a drifting equity ratio
+never trims a copy the master did not touch.
+
+Every copy is also written to `state/journal.jsonl` (`GET /v1/journal`): master execution time, when the
+copier saw it, order sent and filled (so the copy latency), fill vs master price in points (slippage), and the
+close with its reason and result. A Manager-read master's clock offset is learned from a trade seen promptly.
 
 Volumes always round **down** to the symbol's lot step, so a rounding error can
 never increase exposure.

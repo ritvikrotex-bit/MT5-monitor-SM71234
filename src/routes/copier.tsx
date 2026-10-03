@@ -3,7 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
+  CheckCircle2,
   ChevronDown,
+  FlaskConical,
   Pause,
   Play,
   Plus,
@@ -13,6 +15,7 @@ import {
   ShieldAlert,
   Trash2,
   X,
+  XCircle,
 } from "lucide-react";
 import { AppShell } from "@/components/mt5/AppShell";
 import {
@@ -52,8 +55,9 @@ type Master =
 
 type Rules = {
   autoMatch: boolean;
-  lotMode: "FIXED" | "MULTIPLIER" | "BALANCE" | "EQUITY";
+  lotMode: "FIXED" | "MULTIPLIER" | "BALANCE" | "EQUITY" | "EQUITY_STEP" | "RISK_PERCENT";
   lotValue: number;
+  equityStep?: number;
   maxLot: number;
   minVolumeAction: "SKIP" | "MIN";
   symbolSuffix: string;
@@ -61,10 +65,25 @@ type Rules = {
   allowSymbols: string[];
   denySymbols: string[];
   reverse: boolean;
-  copySlTp: boolean;
+  copySl?: boolean;
+  copyTp?: boolean;
+  /** Links saved before SL and TP were split. */
+  copySlTp?: boolean;
   copyExisting: boolean;
   maxOpenPositions: number;
   maxSlippagePoints: number;
+  maxTradesPerDay?: number;
+  maxBuyLots?: number;
+  maxSellLots?: number;
+  sessionStart?: string;
+  sessionEnd?: string;
+  sessionDays?: number[];
+  maxDailyLoss?: number;
+  maxConsecutiveLosses?: number;
+  maxLossPerTrade?: number;
+  exitMode?: "MASTER" | "TRAILING";
+  trailActivation?: number;
+  trailDrawdownPct?: number;
 };
 
 type LinkStatus = {
@@ -73,6 +92,9 @@ type LinkStatus = {
     copiedCount: number;
     haltedReason: string | null;
     ignored: number;
+    tradesToday?: number;
+    riskBlock?: string | null;
+    today?: { realized: number; floating: number; total: number; lossStreak: number } | null;
   };
   cycle: {
     error?: string | null;
@@ -101,6 +123,45 @@ type CopierEvent = {
   kind: string;
   message: string;
   dryRun: boolean;
+};
+
+/** How an account's terminal worker is doing, as the copier reports it. */
+type WorkerStatus = {
+  running: boolean;
+  lastError: string | null;
+  lastOkAt?: number | null;
+  starts?: number;
+};
+
+type TestStep = {
+  key: string;
+  title: string;
+  status: "pass" | "warn" | "fail";
+  detail: string;
+  sample?: string;
+};
+
+type TestResult = { ok: boolean; at: number; steps: TestStep[] };
+
+/** One copy from the trade journal. Times are epoch seconds. */
+type JournalTrade = {
+  status: "open" | "closed";
+  linkId: string;
+  linkLabel?: string;
+  masterTicket: number;
+  masterSymbol?: string;
+  ticket?: number;
+  symbol?: string;
+  side?: string;
+  volume?: number;
+  price?: number;
+  openedAt?: number;
+  latencyMs?: number;
+  executionMs?: number;
+  slippagePoints?: number;
+  closedAt?: number;
+  closeReason?: string;
+  profit?: number;
 };
 
 type Snapshot = {
@@ -148,18 +209,22 @@ function CopierPage() {
   const [addingLink, setAddingLink] = useState(false);
   const [editingLink, setEditingLink] = useState<string | null>(null);
   const [probe, setProbe] = useState<Record<string, Snapshot | string>>({});
+  const [workers, setWorkers] = useState<Record<string, WorkerStatus>>({});
+  const [tests, setTests] = useState<Record<string, TestResult | string>>({});
 
   const load = useCallback(async () => {
     const data = await api<{
       accounts: Account[];
       brokers: Broker[];
       links: CopyLink[];
+      workers?: Record<string, WorkerStatus>;
       events: CopierEvent[];
       service: { running: boolean; error: string | null };
     }>("/api/copier");
     setAccounts(data.accounts);
     setBrokers(data.brokers);
     setLinks(data.links);
+    setWorkers(data.workers ?? {});
     setEvents(data.events);
     setService(data.service);
   }, []);
@@ -287,7 +352,7 @@ function CopierPage() {
             />
           )}
 
-          <div className="mt-3 space-y-3">
+          <div className="mt-3 space-y-4">
             {links.length === 0 && !addingLink && (
               <Empty>
                 {accounts.length === 0
@@ -295,35 +360,104 @@ function CopierPage() {
                   : "No links yet."}
               </Empty>
             )}
-            {links.map((link) => (
-              <LinkRow
-                key={link.id}
-                link={link}
-                masterLabel={masterLabel(link.master)}
-                dest={accountById(link.destAccountId)}
-                busy={busy}
-                onAction={run}
-                editing={editingLink === link.id}
-                onToggleEdit={() =>
-                  setEditingLink((current) => (current === link.id ? null : link.id))
-                }
-                onSaveEdit={(body) =>
-                  run(
-                    `link-${link.id}`,
-                    async () => {
-                      await api(`/api/copier/links/${link.id}`, {
-                        method: "PATCH",
-                        body: JSON.stringify(body),
-                      });
-                      setEditingLink(null);
-                    },
-                    "Link updated.",
-                  )
-                }
-              />
-            ))}
+            {groupByMaster(links).map(([key, group]) => {
+              const runningCount = group.filter((l) => l.enabled).length;
+              const pause = runningCount > 0;
+              return (
+                <section key={key} className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                    <p className="min-w-0 text-xs break-words text-muted-foreground">
+                      <span className="font-semibold text-foreground">
+                        📡 {masterLabel(group[0]!.master)}
+                      </span>{" "}
+                      · {group.length} link{group.length === 1 ? "" : "s"} · {runningCount} running
+                    </p>
+                    <button
+                      onClick={() =>
+                        void run(
+                          `master-${key}`,
+                          async () => {
+                            for (const l of group) {
+                              if (l.enabled === !pause) continue;
+                              await api(`/api/copier/links/${l.id}`, {
+                                method: "PATCH",
+                                body: JSON.stringify({ enabled: !pause }),
+                              });
+                            }
+                          },
+                          pause
+                            ? "Master paused: none of its links copy until you resume it."
+                            : "Master resumed.",
+                        )
+                      }
+                      disabled={busy === `master-${key}`}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-medium whitespace-nowrap hover:bg-secondary disabled:opacity-50"
+                    >
+                      {pause ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+                      {pause ? "Pause master" : "Resume master"}
+                    </button>
+                  </div>
+                  {group.map((link) => (
+                    <LinkRow
+                      key={link.id}
+                      link={link}
+                      masterLabel={masterLabel(link.master)}
+                      dest={accountById(link.destAccountId)}
+                      busy={busy}
+                      onAction={run}
+                      test={tests[link.id]}
+                      onTest={() =>
+                        run(`test-${link.id}`, async () => {
+                          try {
+                            const result = await api<TestResult>(
+                              `/api/copier/links/${link.id}/test`,
+                              {
+                                method: "POST",
+                              },
+                            );
+                            setTests((t) => ({ ...t, [link.id]: result }));
+                          } catch (e) {
+                            setTests((t) => ({
+                              ...t,
+                              [link.id]: e instanceof Error ? e.message : "The test run failed.",
+                            }));
+                            throw e;
+                          }
+                        })
+                      }
+                      onDismissTest={() =>
+                        setTests((t) => {
+                          const { [link.id]: _done, ...rest } = t;
+                          return rest;
+                        })
+                      }
+                      editing={editingLink === link.id}
+                      onToggleEdit={() =>
+                        setEditingLink((current) => (current === link.id ? null : link.id))
+                      }
+                      onSaveEdit={(body) =>
+                        run(
+                          `link-${link.id}`,
+                          async () => {
+                            await api(`/api/copier/links/${link.id}`, {
+                              method: "PATCH",
+                              body: JSON.stringify(body),
+                            });
+                            setEditingLink(null);
+                          },
+                          "Link updated.",
+                        )
+                      }
+                    />
+                  ))}
+                </section>
+              );
+            })}
           </div>
         </Card>
+
+        {/* ---------------- journal ---------------- */}
+        {links.length > 0 && <TradeJournal />}
 
         {/* ---------------- accounts ---------------- */}
         <Card
@@ -367,6 +501,7 @@ function CopierPage() {
                 key={account.id}
                 account={account}
                 result={probe[account.id]}
+                worker={workers[account.id]}
                 busy={busy}
                 onProbe={() =>
                   run(`probe-${account.id}`, async () => {
@@ -426,6 +561,160 @@ function CopierPage() {
   );
 }
 
+/** Links grouped under the master they copy, in the order they were created. */
+function groupByMaster(links: CopyLink[]): [string, CopyLink[]][] {
+  const groups = new Map<string, CopyLink[]>();
+  for (const link of links) {
+    const m = link.master;
+    const key = m.kind === "MANAGER" ? `M:${m.brokerId}:${m.login}` : `T:${m.accountId}`;
+    groups.set(key, [...(groups.get(key) ?? []), link]);
+  }
+  return [...groups.entries()];
+}
+
+const CLOSE_REASON: Record<string, string> = {
+  "master closed": "master closed",
+  "trailing exit": "trailing exit",
+  "loss per trade": "loss stop",
+};
+
+/** Every copy with its latency, slippage and result; downloadable as CSV. */
+function TradeJournal() {
+  const [trades, setTrades] = useState<JournalTrade[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api<{ trades: JournalTrade[] }>("/api/copier/journal?limit=200");
+      setTrades(data.trades);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load the journal.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const timer = setInterval(() => void load(), 30_000);
+    return () => clearInterval(timer);
+  }, [load]);
+
+  const closed = (trades ?? []).filter((t) => t.status === "closed");
+  const totalPl = closed.reduce((sum, t) => sum + (t.profit ?? 0), 0);
+  const latencies = (trades ?? []).flatMap((t) => (t.latencyMs != null ? [t.latencyMs] : []));
+  const avgLatency = latencies.length
+    ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length)
+    : null;
+
+  return (
+    <Card
+      title="Trade journal"
+      description="Every copy: when the master executed, how long the copy took, how far it slipped, and what it made."
+      action={
+        <a
+          href="/api/copier/journal?format=csv&limit=5000"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold whitespace-nowrap hover:bg-secondary"
+        >
+          Download CSV
+        </a>
+      }
+    >
+      {error && <p className="mt-2 text-[11px] break-words text-destructive">{error}</p>}
+      {trades && trades.length === 0 && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          No copies recorded yet. Copies made from now on appear here.
+        </p>
+      )}
+      {trades && trades.length > 0 && (
+        <>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+            <span>{trades.length} copies</span>
+            <span>
+              Closed P/L{" "}
+              <span
+                className={cn(
+                  "num font-semibold",
+                  totalPl >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-destructive",
+                )}
+              >
+                {totalPl >= 0 ? "+" : ""}
+                {totalPl.toFixed(2)}
+              </span>
+            </span>
+            {avgLatency !== null && <span>Average latency {avgLatency} ms</span>}
+          </div>
+          <div className="mt-2 overflow-x-auto rounded-lg border border-border/70">
+            <table className="w-full min-w-[720px] text-left text-[11px]">
+              <thead className="bg-secondary/50 text-muted-foreground">
+                <tr>
+                  <th className="px-2 py-1.5 font-medium">Opened</th>
+                  <th className="px-2 py-1.5 font-medium">Master</th>
+                  <th className="px-2 py-1.5 font-medium">Copy</th>
+                  <th className="px-2 py-1.5 font-medium">Fill</th>
+                  <th className="px-2 py-1.5 font-medium">Latency</th>
+                  <th className="px-2 py-1.5 font-medium">Slippage</th>
+                  <th className="px-2 py-1.5 font-medium">Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trades.map((t) => (
+                  <tr key={`${t.linkId}-${t.masterTicket}`} className="border-t border-border/60">
+                    <td className="num px-2 py-1.5 whitespace-nowrap">
+                      {t.openedAt ? new Date(t.openedAt * 1000).toLocaleString() : "—"}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {t.masterSymbol ?? "—"} <span className="num">#{t.masterTicket}</span>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      {t.side} {t.volume} {t.symbol}{" "}
+                      {t.ticket ? <span className="num">#{t.ticket}</span> : null}
+                    </td>
+                    <td className="num px-2 py-1.5">{t.price ?? "—"}</td>
+                    <td className="num px-2 py-1.5">
+                      {t.latencyMs != null
+                        ? `${t.latencyMs} ms`
+                        : t.executionMs != null
+                          ? `fill ${t.executionMs} ms`
+                          : "—"}
+                    </td>
+                    <td className="num px-2 py-1.5">
+                      {t.slippagePoints != null
+                        ? `${t.slippagePoints > 0 ? "+" : ""}${t.slippagePoints} pts`
+                        : "—"}
+                    </td>
+                    <td className="px-2 py-1.5 whitespace-nowrap">
+                      {t.status === "open" ? (
+                        <Tag tone="info" text="open" />
+                      ) : (
+                        <>
+                          <span
+                            className={cn(
+                              "num font-semibold",
+                              (t.profit ?? 0) >= 0
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-destructive",
+                            )}
+                          >
+                            {(t.profit ?? 0) >= 0 ? "+" : ""}
+                            {(t.profit ?? 0).toFixed(2)}
+                          </span>
+                          <span className="ml-1 text-muted-foreground">
+                            {CLOSE_REASON[t.closeReason ?? ""] ?? t.closeReason}
+                          </span>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 function Banner({
   tone,
   children,
@@ -466,16 +755,19 @@ function Empty({ children }: { children: React.ReactNode }) {
 function AccountRow({
   account,
   result,
+  worker,
   busy,
   onProbe,
   onDelete,
 }: {
   account: Account;
   result: Snapshot | string | undefined;
+  worker: WorkerStatus | undefined;
   busy: string | null;
   onProbe: () => void;
   onDelete: () => void;
 }) {
+  const restarts = Math.max(0, (worker?.starts ?? 0) - 1);
   return (
     <div className="rounded-xl border border-border bg-secondary/40 p-3">
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
@@ -496,7 +788,27 @@ function AccountRow({
                     : "destination"
               }
             />
+            {worker && (
+              <Tag
+                tone={worker.lastError ? "warn" : worker.running ? "ok" : "muted"}
+                text={
+                  worker.lastError
+                    ? "terminal problem"
+                    : worker.running
+                      ? "terminal connected"
+                      : "terminal idle · starts when needed"
+                }
+              />
+            )}
+            {restarts > 0 && (
+              <Tag tone="muted" text={`recovered ${restarts}× since the copier started`} />
+            )}
           </div>
+          {worker?.lastError && (
+            <p className="mt-1.5 text-[11px] break-words text-amber-600 dark:text-amber-400">
+              {worker.lastError}
+            </p>
+          )}
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
           <button
@@ -557,6 +869,82 @@ function AccountRow({
   );
 }
 
+const STEP_STYLE: Record<TestStep["status"], { icon: typeof CheckCircle2; className: string }> = {
+  pass: { icon: CheckCircle2, className: "text-emerald-600 dark:text-emerald-400" },
+  warn: { icon: AlertTriangle, className: "text-amber-600 dark:text-amber-400" },
+  fail: { icon: XCircle, className: "text-destructive" },
+};
+
+/** The outcome of a test run, one line per step. */
+function TestRunPanel({
+  result,
+  onDismiss,
+}: {
+  result: TestResult | string;
+  onDismiss: () => void;
+}) {
+  if (typeof result === "string") {
+    return (
+      <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 p-2 text-[11px] text-destructive">
+        <XCircle className="mt-0.5 size-3.5 shrink-0" />
+        <p className="min-w-0 flex-1 break-words">Test run could not finish: {result}</p>
+        <button onClick={onDismiss} aria-label="Dismiss test result">
+          <X className="size-3.5" />
+        </button>
+      </div>
+    );
+  }
+  const failed = result.steps.filter((s) => s.status === "fail").length;
+  const warned = result.steps.filter((s) => s.status === "warn").length;
+  return (
+    <div
+      className={cn(
+        "mt-2 rounded-lg border p-2.5 text-[11px]",
+        result.ok
+          ? "border-emerald-500/40 bg-emerald-500/5"
+          : "border-destructive/40 bg-destructive/5",
+      )}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="min-w-0 flex-1 font-semibold">
+          {result.ok
+            ? warned
+              ? `Test run passed with ${warned} note${warned === 1 ? "" : "s"}`
+              : "Test run passed: this link is ready to copy"
+            : `Test run found ${failed} problem${failed === 1 ? "" : "s"}`}
+          <span className="ml-1.5 font-normal text-muted-foreground">
+            · {new Date(result.at * 1000).toLocaleTimeString()} · no order was placed
+          </span>
+        </p>
+        <button onClick={onDismiss} aria-label="Dismiss test result">
+          <X className="size-3.5" />
+        </button>
+      </div>
+      <ul className="mt-2 space-y-1.5">
+        {result.steps.map((step) => {
+          const { icon: Icon, className } = STEP_STYLE[step.status];
+          return (
+            <li key={step.key} className="flex items-start gap-2">
+              <Icon className={cn("mt-0.5 size-3.5 shrink-0", className)} />
+              <div className="min-w-0 flex-1">
+                <p className="font-medium break-words">
+                  {step.title}
+                  {step.sample && (
+                    <span className="ml-1.5 font-normal text-muted-foreground">
+                      ({step.sample})
+                    </span>
+                  )}
+                </p>
+                <p className="break-words text-muted-foreground">{step.detail}</p>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function MiniStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-background/60 px-2 py-1.5">
@@ -572,6 +960,9 @@ function LinkRow({
   dest,
   busy,
   onAction,
+  test,
+  onTest,
+  onDismissTest,
   editing,
   onToggleEdit,
   onSaveEdit,
@@ -581,6 +972,9 @@ function LinkRow({
   dest: Account | undefined;
   busy: string | null;
   onAction: (key: string, fn: () => Promise<unknown>, done?: string) => Promise<void>;
+  test: TestResult | string | undefined;
+  onTest: () => void;
+  onDismissTest: () => void;
   editing: boolean;
   onToggleEdit: () => void;
   onSaveEdit: (body: Record<string, unknown>) => void;
@@ -630,17 +1024,82 @@ function LinkRow({
               <Tag tone="muted" text={`${mappings} symbol mapping${mappings === 1 ? "" : "s"}`} />
             )}
             {rules.reverse && <Tag tone="warn" text="reversed" />}
-            {!rules.copySlTp && <Tag tone="muted" text="no SL/TP" />}
+            {rules.exitMode === "TRAILING" ? (
+              <Tag
+                tone="info"
+                text={`trailing ${rules.trailDrawdownPct}% from +${rules.trailActivation ?? 0}`}
+              />
+            ) : (
+              <>
+                {!(rules.copySl ?? rules.copySlTp ?? true) && <Tag tone="muted" text="no SL" />}
+                {!(rules.copyTp ?? rules.copySlTp ?? true) && <Tag tone="muted" text="no TP" />}
+              </>
+            )}
             {rules.maxOpenPositions > 0 && (
               <Tag tone="muted" text={`max ${rules.maxOpenPositions} open`} />
+            )}
+            {(rules.maxTradesPerDay ?? 0) > 0 && (
+              <Tag tone="muted" text={`max ${rules.maxTradesPerDay} trades/day`} />
+            )}
+            {(rules.maxBuyLots ?? 0) > 0 && (
+              <Tag tone="muted" text={`BUY ≤ ${rules.maxBuyLots} lots`} />
+            )}
+            {(rules.maxSellLots ?? 0) > 0 && (
+              <Tag tone="muted" text={`SELL ≤ ${rules.maxSellLots} lots`} />
+            )}
+            {rules.sessionStart && (
+              <Tag tone="muted" text={`${rules.sessionStart}–${rules.sessionEnd} server`} />
+            )}
+            {(rules.maxDailyLoss ?? 0) > 0 && (
+              <Tag tone="muted" text={`daily loss ≤ ${rules.maxDailyLoss}`} />
+            )}
+            {(rules.maxConsecutiveLosses ?? 0) > 0 && (
+              <Tag tone="muted" text={`pause after ${rules.maxConsecutiveLosses} losses`} />
+            )}
+            {(rules.maxLossPerTrade ?? 0) > 0 && (
+              <Tag tone="muted" text={`close copy at -${rules.maxLossPerTrade}`} />
             )}
             {link.maxDrawdownPct > 0 && (
               <Tag tone="muted" text={`stop at -${link.maxDrawdownPct}%`} />
             )}
           </div>
+          {link.status && (
+            <p className="mt-1.5 text-[11px] break-words text-muted-foreground">
+              Today (broker day): {link.status.state.tradesToday ?? 0} copied
+              {link.status.state.today && (
+                <>
+                  {" "}
+                  · P/L{" "}
+                  <span
+                    className={cn(
+                      "num font-medium",
+                      link.status.state.today.total >= 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-destructive",
+                    )}
+                  >
+                    {link.status.state.today.total >= 0 ? "+" : ""}
+                    {link.status.state.today.total.toFixed(2)}
+                  </span>{" "}
+                  · losing streak {link.status.state.today.lossStreak}
+                </>
+              )}
+            </p>
+          )}
         </div>
 
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <button
+            onClick={onTest}
+            disabled={busy === `test-${link.id}`}
+            title="Check the whole link without placing an order"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-primary/40 px-2.5 py-1 text-xs font-medium whitespace-nowrap text-primary hover:bg-primary/10 disabled:opacity-50"
+          >
+            <FlaskConical
+              className={cn("size-3.5", busy === `test-${link.id}` && "animate-pulse")}
+            />
+            {busy === `test-${link.id}` ? "Testing..." : "Test run"}
+          </button>
           <button
             onClick={onToggleEdit}
             className={cn(
@@ -738,11 +1197,33 @@ function LinkRow({
           </button>
         </div>
       )}
+      {!halted && link.status?.state.riskBlock && (
+        <div className="mt-2 flex flex-wrap items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-700 dark:text-amber-400">
+          <ShieldAlert className="mt-0.5 size-3.5 shrink-0" />
+          <p className="min-w-0 flex-1 break-words">
+            Copying paused: {link.status.state.riskBlock}. Open copies are still managed. Resuming
+            starts a fresh count and leaves trades the master already holds alone.
+          </p>
+          <button
+            onClick={() =>
+              void onAction(
+                `link-${link.id}`,
+                () => api(`/api/copier/links/${link.id}/arm`, { method: "POST" }),
+                "Copying resumed.",
+              )
+            }
+            className="shrink-0 rounded-lg border border-amber-500/50 px-2 py-0.5 font-semibold whitespace-nowrap"
+          >
+            Resume
+          </button>
+        </div>
+      )}
       {!halted && cycleError && (
         <p className="mt-2 rounded-lg bg-amber-500/10 p-2 text-[11px] break-words text-amber-600 dark:text-amber-400">
           {cycleError}
         </p>
       )}
+      {test !== undefined && <TestRunPanel result={test} onDismiss={onDismissTest} />}
       {editing && (
         <EditLinkForm
           link={link}
@@ -834,7 +1315,7 @@ function AccountForm({
             className={inputClass}
             value={form.label}
             onChange={set("label")}
-            placeholder="Slave — Wyncrest"
+            placeholder="e.g. Slave — Main account"
           />
         </Field>
         <Field label="Broker" hint="Optional, for your own reference.">
@@ -842,7 +1323,7 @@ function AccountForm({
             className={inputClass}
             value={form.broker}
             onChange={set("broker")}
-            placeholder="Wyncrest Capital"
+            placeholder="e.g. Your broker's name"
           />
         </Field>
         <Field
@@ -854,7 +1335,7 @@ function AccountForm({
             className={inputClass}
             value={form.server}
             onChange={set("server")}
-            placeholder="WyncrestCapital-Trade"
+            placeholder="e.g. BrokerName-Live"
           />
         </Field>
         <Field label="MT5 login">
@@ -864,7 +1345,7 @@ function AccountForm({
             className={inputClass}
             value={form.login}
             onChange={set("login")}
-            placeholder="910102"
+            placeholder="e.g. 12345678"
           />
         </Field>
         <Field
@@ -899,29 +1380,66 @@ function AccountForm({
 type RulesForm = {
   lotMode: Rules["lotMode"];
   lotValue: string;
+  equityStep: string;
   maxLot: string;
   minVolumeAction: Rules["minVolumeAction"];
   maxOpenPositions: string;
   maxSlippagePoints: string;
   maxDrawdownPct: string;
   reverse: boolean;
-  copySlTp: boolean;
+  copySl: boolean;
+  copyTp: boolean;
   copyExisting: boolean;
+  maxTradesPerDay: string;
+  maxBuyLots: string;
+  maxSellLots: string;
+  sessionStart: string;
+  sessionEnd: string;
+  sessionDays: number[];
+  maxDailyLoss: string;
+  maxConsecutiveLosses: string;
+  maxLossPerTrade: string;
+  exitMode: "MASTER" | "TRAILING";
+  trailActivation: string;
+  trailDrawdownPct: string;
 };
+
+/** Toggles hold booleans; the day picker holds a list; everything else is text. */
+type TextKey = {
+  [K in keyof RulesForm]: RulesForm[K] extends string ? K : never;
+}[keyof RulesForm];
+type BoolKey = {
+  [K in keyof RulesForm]: RulesForm[K] extends boolean ? K : never;
+}[keyof RulesForm];
 
 function rulesDefaults(link?: CopyLink): RulesForm {
   const r = link?.rules;
+  const legacyStops = r?.copySlTp ?? true;
   return {
     lotMode: r?.lotMode ?? "BALANCE",
     lotValue: String(r?.lotValue ?? 1),
+    equityStep: String(r?.equityStep ?? 1000),
     maxLot: String(r?.maxLot ?? 0),
     minVolumeAction: r?.minVolumeAction ?? "SKIP",
     maxOpenPositions: String(r?.maxOpenPositions ?? 0),
     maxSlippagePoints: String(r?.maxSlippagePoints ?? 20),
     maxDrawdownPct: String(link?.maxDrawdownPct ?? 0),
     reverse: r?.reverse ?? false,
-    copySlTp: r?.copySlTp ?? true,
+    copySl: r?.copySl ?? legacyStops,
+    copyTp: r?.copyTp ?? legacyStops,
     copyExisting: r?.copyExisting ?? false,
+    maxTradesPerDay: String(r?.maxTradesPerDay ?? 0),
+    maxBuyLots: String(r?.maxBuyLots ?? 0),
+    maxSellLots: String(r?.maxSellLots ?? 0),
+    sessionStart: r?.sessionStart ?? "",
+    sessionEnd: r?.sessionEnd ?? "",
+    sessionDays: r?.sessionDays ?? [],
+    maxDailyLoss: String(r?.maxDailyLoss ?? 0),
+    maxConsecutiveLosses: String(r?.maxConsecutiveLosses ?? 0),
+    maxLossPerTrade: String(r?.maxLossPerTrade ?? 0),
+    exitMode: r?.exitMode ?? "MASTER",
+    trailActivation: String(r?.trailActivation ?? 5),
+    trailDrawdownPct: String(r?.trailDrawdownPct || 20),
   };
 }
 
@@ -931,20 +1449,34 @@ function rulesPayload(form: RulesForm, translation: TranslationForm) {
     rules: {
       lotMode: form.lotMode,
       lotValue: Number(form.lotValue),
+      equityStep: Number(form.equityStep),
       maxLot: Number(form.maxLot),
       minVolumeAction: form.minVolumeAction,
       maxOpenPositions: Number(form.maxOpenPositions),
       maxSlippagePoints: Number(form.maxSlippagePoints),
       reverse: form.reverse,
-      copySlTp: form.copySlTp,
+      copySl: form.copySl,
+      copyTp: form.copyTp,
       copyExisting: form.copyExisting,
+      maxTradesPerDay: Number(form.maxTradesPerDay),
+      maxBuyLots: Number(form.maxBuyLots),
+      maxSellLots: Number(form.maxSellLots),
+      sessionStart: form.sessionStart,
+      sessionEnd: form.sessionEnd,
+      sessionDays: form.sessionDays,
+      maxDailyLoss: Number(form.maxDailyLoss),
+      maxConsecutiveLosses: Number(form.maxConsecutiveLosses),
+      maxLossPerTrade: Number(form.maxLossPerTrade),
+      exitMode: form.exitMode,
+      trailActivation: Number(form.trailActivation),
+      trailDrawdownPct: form.exitMode === "TRAILING" ? Number(form.trailDrawdownPct) : 0,
       ...translationPayload(translation),
     },
   };
 }
 
 type FieldSetter = (
-  key: keyof RulesForm,
+  key: TextKey,
 ) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => void;
 
 function useRulesForm(link?: CopyLink) {
@@ -953,15 +1485,36 @@ function useRulesForm(link?: CopyLink) {
     translationDefaults(link?.rules),
   );
   const set: FieldSetter = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
-  const toggle = (key: keyof RulesForm) => (value: boolean) =>
-    setForm((f) => ({ ...f, [key]: value }));
-  return { form, set, toggle, translation, setTranslation };
+  const toggle = (key: BoolKey) => (value: boolean) => setForm((f) => ({ ...f, [key]: value }));
+  const toggleDay = (day: number) =>
+    setForm((f) => ({
+      ...f,
+      sessionDays: f.sessionDays.includes(day)
+        ? f.sessionDays.filter((d) => d !== day)
+        : [...f.sessionDays, day].sort(),
+    }));
+  return { form, set, toggle, toggleDay, translation, setTranslation };
 }
+
+const LOT_VALUE_LABEL: Record<Rules["lotMode"], { label: string; hint?: string }> = {
+  FIXED: { label: "Lots per trade" },
+  MULTIPLIER: { label: "Factor", hint: "The master's lot times this." },
+  BALANCE: { label: "Factor", hint: "Applied on top of the scaling." },
+  EQUITY: { label: "Factor", hint: "Applied on top of the scaling." },
+  EQUITY_STEP: { label: "Lots per step", hint: "e.g. 0.01 lots for every step of equity below." },
+  RISK_PERCENT: {
+    label: "Risk per trade (% of equity)",
+    hint: "Lost if the master's stop loss is hit. Trades without a stop loss are skipped.",
+  },
+};
+
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 function RulesFields({
   form,
   set,
   toggle,
+  toggleDay,
   translation,
   setTranslation,
   linkId,
@@ -969,12 +1522,16 @@ function RulesFields({
 }: {
   form: RulesForm;
   set: FieldSetter;
-  toggle: (key: keyof RulesForm) => (value: boolean) => void;
+  toggle: (key: BoolKey) => (value: boolean) => void;
+  toggleDay: (day: number) => void;
   translation: TranslationForm;
   setTranslation: (next: TranslationForm) => void;
   linkId: string | undefined;
   destinationSymbols: string[];
 }) {
+  const lotValue = LOT_VALUE_LABEL[form.lotMode];
+  const peakExample = 50;
+  const drawdown = Number(form.trailDrawdownPct) || 0;
   return (
     <>
       <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
@@ -987,14 +1544,13 @@ function RulesFields({
             <select className={inputClass} value={form.lotMode} onChange={set("lotMode")}>
               <option value="BALANCE">Auto-scale by balance</option>
               <option value="EQUITY">Auto-scale by equity</option>
+              <option value="EQUITY_STEP">Lots per equity step ($1,000 → 0.01)</option>
+              <option value="RISK_PERCENT">Risk a % of equity at the master's SL</option>
               <option value="MULTIPLIER">Multiply the master's lot</option>
               <option value="FIXED">Fixed lot</option>
             </select>
           </Field>
-          <Field
-            label={form.lotMode === "FIXED" ? "Lots per trade" : "Factor"}
-            {...(form.lotMode === "FIXED" ? {} : { hint: "Applied on top of the scaling above." })}
-          >
+          <Field label={lotValue.label} {...(lotValue.hint ? { hint: lotValue.hint } : {})}>
             <input
               required
               type="number"
@@ -1005,6 +1561,22 @@ function RulesFields({
               onChange={set("lotValue")}
             />
           </Field>
+          {form.lotMode === "EQUITY_STEP" && (
+            <Field
+              label="Equity step"
+              hint={`${form.lotValue || 0} lots per ${form.equityStep || 0} of slave equity, in whole steps.`}
+            >
+              <input
+                required
+                type="number"
+                step="1"
+                min="1"
+                className={inputClass}
+                value={form.equityStep}
+                onChange={set("equityStep")}
+              />
+            </Field>
+          )}
           <Field label="Maximum lots per order" hint="0 means no cap. Worth setting.">
             <input
               type="number"
@@ -1040,17 +1612,8 @@ function RulesFields({
       />
 
       <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
-        <legend className="px-1 text-xs font-semibold">Limits and behaviour</legend>
+        <legend className="px-1 text-xs font-semibold">Copy settings</legend>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Maximum open copies" hint="0 means no cap.">
-            <input
-              type="number"
-              min="0"
-              className={inputClass}
-              value={form.maxOpenPositions}
-              onChange={set("maxOpenPositions")}
-            />
-          </Field>
           <Field label="Slippage allowance (points)">
             <input
               type="number"
@@ -1060,9 +1623,111 @@ function RulesFields({
               onChange={set("maxSlippagePoints")}
             />
           </Field>
+        </div>
+        <div className="space-y-2">
+          <Toggle
+            checked={form.copyExisting}
+            onChange={toggle("copyExisting")}
+            label="Copy trades already open on the master"
+            hint="Off by default: it would enter at prices the master never paid."
+          />
+          <Toggle
+            checked={form.reverse}
+            onChange={toggle("reverse")}
+            label="Reverse the direction"
+            hint="Buys become sells. The master's stops are not copied, since they would sit on the wrong side."
+          />
+          <p className="text-[11px] break-words text-muted-foreground">
+            Opens, closes and partial closes are always copied. A partial close shrinks the copy by
+            the same share the master closed.
+          </p>
+        </div>
+      </fieldset>
+
+      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
+        <legend className="px-1 text-xs font-semibold">Risk limits</legend>
+        <p className="text-[11px] break-words text-muted-foreground">
+          0 or empty turns a limit off. Days and hours use the slave broker&apos;s server time, the
+          clock its MT5 charts show. When a limit is reached, new trades are not copied, open copies
+          are still managed, and you get one Telegram alert.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Maximum open copies">
+            <input
+              type="number"
+              min="0"
+              className={inputClass}
+              value={form.maxOpenPositions}
+              onChange={set("maxOpenPositions")}
+            />
+          </Field>
+          <Field label="Maximum trades per day">
+            <input
+              type="number"
+              min="0"
+              className={inputClass}
+              value={form.maxTradesPerDay}
+              onChange={set("maxTradesPerDay")}
+            />
+          </Field>
+          <Field label="Maximum BUY exposure (lots)">
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              className={inputClass}
+              value={form.maxBuyLots}
+              onChange={set("maxBuyLots")}
+            />
+          </Field>
+          <Field label="Maximum SELL exposure (lots)">
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              className={inputClass}
+              value={form.maxSellLots}
+              onChange={set("maxSellLots")}
+            />
+          </Field>
+          <Field label="Maximum daily loss" hint="Realized plus floating, since broker midnight.">
+            <input
+              type="number"
+              step="1"
+              min="0"
+              className={inputClass}
+              value={form.maxDailyLoss}
+              onChange={set("maxDailyLoss")}
+            />
+          </Field>
           <Field
-            label="Stop if destination equity drops by (%)"
-            hint="0 is off. When it fires, the link closes its copies and stays stopped until you arm it."
+            label="Maximum consecutive losses"
+            hint="Pauses copying until you resume the link."
+          >
+            <input
+              type="number"
+              min="0"
+              className={inputClass}
+              value={form.maxConsecutiveLosses}
+              onChange={set("maxConsecutiveLosses")}
+            />
+          </Field>
+          <Field
+            label="Maximum loss per trade"
+            hint="A copy losing this much is closed on the slave, even if the master stays open."
+          >
+            <input
+              type="number"
+              step="1"
+              min="0"
+              className={inputClass}
+              value={form.maxLossPerTrade}
+              onChange={set("maxLossPerTrade")}
+            />
+          </Field>
+          <Field
+            label="Stop if slave equity drops by (%)"
+            hint="Closes this link's copies and stops it until you arm it again."
           >
             <input
               type="number"
@@ -1073,27 +1738,115 @@ function RulesFields({
               onChange={set("maxDrawdownPct")}
             />
           </Field>
+          <Field label="Trading session from" hint="Server time. Leave both empty for all day.">
+            <input
+              type="time"
+              className={inputClass}
+              value={form.sessionStart}
+              onChange={set("sessionStart")}
+            />
+          </Field>
+          <Field label="Trading session until" hint="An end before the start runs overnight.">
+            <input
+              type="time"
+              className={inputClass}
+              value={form.sessionEnd}
+              onChange={set("sessionEnd")}
+            />
+          </Field>
         </div>
-        <div className="space-y-2">
-          <Toggle
-            checked={form.copySlTp}
-            onChange={toggle("copySlTp")}
-            label="Copy stop loss and take profit"
-            hint="Mirrors the master's levels, and follows them when they move."
-          />
-          <Toggle
-            checked={form.reverse}
-            onChange={toggle("reverse")}
-            label="Reverse the direction"
-            hint="Buys become sells. The master's stops are not copied, since they would sit on the wrong side."
-          />
-          <Toggle
-            checked={form.copyExisting}
-            onChange={toggle("copyExisting")}
-            label="Copy trades already open on the master"
-            hint="Off by default: it would enter at prices the master never paid."
-          />
+        <div>
+          <p className="text-xs font-medium">Trading days</p>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {WEEKDAYS.map((name, day) => {
+              const on = form.sessionDays.includes(day);
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => toggleDay(day)}
+                  aria-pressed={on}
+                  className={cn(
+                    "rounded-lg border px-2.5 py-1 text-xs font-medium",
+                    on
+                      ? "border-primary/50 bg-primary/10 text-primary"
+                      : "border-border text-muted-foreground hover:bg-secondary",
+                  )}
+                >
+                  {name}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {form.sessionDays.length === 0
+              ? "None selected: every day."
+              : "Copying only on the highlighted days."}
+          </p>
         </div>
+      </fieldset>
+
+      <fieldset className="space-y-3 rounded-lg border border-border/70 p-3">
+        <legend className="px-1 text-xs font-semibold">Profit protection</legend>
+        <Field
+          label="How copies exit"
+          hint="Pick one: two exit rules running at once would fight each other."
+        >
+          <select className={inputClass} value={form.exitMode} onChange={set("exitMode")}>
+            <option value="MASTER">Follow the master&apos;s stop loss / take profit</option>
+            <option value="TRAILING">Trail the profit on the slave</option>
+          </select>
+        </Field>
+        {form.exitMode === "MASTER" ? (
+          <div className="space-y-2">
+            <Toggle
+              checked={form.copySl}
+              onChange={toggle("copySl")}
+              label="Copy the stop loss"
+              hint="Mirrors the master's SL, and moves it when the master trails it."
+            />
+            <Toggle
+              checked={form.copyTp}
+              onChange={toggle("copyTp")}
+              label="Copy the take profit"
+              hint="Mirrors the master's TP, and follows it when it moves."
+            />
+          </div>
+        ) : (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Start trailing at a profit of" hint="Trailing is off below this.">
+                <input
+                  type="number"
+                  step="0.5"
+                  min="0"
+                  className={inputClass}
+                  value={form.trailActivation}
+                  onChange={set("trailActivation")}
+                />
+              </Field>
+              <Field label="Give back at most (%)" hint="Of the highest profit reached.">
+                <input
+                  required
+                  type="number"
+                  step="1"
+                  min="1"
+                  max="99"
+                  className={inputClass}
+                  value={form.trailDrawdownPct}
+                  onChange={set("trailDrawdownPct")}
+                />
+              </Field>
+            </div>
+            <p className="rounded-lg bg-background/60 p-2 text-[11px] break-words text-muted-foreground">
+              Example: trailing starts once a copy is up {form.trailActivation || 0}. If it peaks at{" "}
+              {peakExample}, it closes when profit falls to{" "}
+              {(peakExample * (1 - drawdown / 100)).toFixed(2)} (giving back{" "}
+              {((peakExample * drawdown) / 100).toFixed(2)}). The master&apos;s SL/TP are not
+              copied; a master close still closes the copy.
+            </p>
+          </>
+        )}
       </fieldset>
     </>
   );
@@ -1135,7 +1888,7 @@ function EditLinkForm({
   onCancel: () => void;
   onSave: (body: Record<string, unknown>) => void;
 }) {
-  const { form, set, toggle, translation, setTranslation } = useRulesForm(link);
+  const { form, set, toggle, toggleDay, translation, setTranslation } = useRulesForm(link);
   const [label, setLabel] = useState(link.label);
   const [problem, setProblem] = useState<string | null>(null);
   const destinationSymbols = useDestinationSymbols(destAccountId);
@@ -1170,6 +1923,7 @@ function EditLinkForm({
         form={form}
         set={set}
         toggle={toggle}
+        toggleDay={toggleDay}
         translation={translation}
         setTranslation={setTranslation}
         linkId={link.id}
@@ -1202,7 +1956,7 @@ function LinkForm({
 }) {
   const destinations = accounts.filter((a) => a.role !== "MASTER");
   const terminalMasters = accounts.filter((a) => a.role !== "DESTINATION");
-  const { form, set, toggle, translation, setTranslation } = useRulesForm();
+  const { form, set, toggle, toggleDay, translation, setTranslation } = useRulesForm();
   const [head, setHead] = useState({
     label: "",
     masterKind: "MANAGER" as Master["kind"],
@@ -1246,7 +2000,7 @@ function LinkForm({
           className={inputClass}
           value={head.label}
           onChange={setHeadField("label")}
-          placeholder="TDFX 100003 to Wyncrest 910102"
+          placeholder="e.g. Signal account to Main slave"
         />
       </Field>
 
@@ -1291,7 +2045,7 @@ function LinkForm({
                 className={inputClass}
                 value={head.masterLogin}
                 onChange={setHeadField("masterLogin")}
-                placeholder="100003"
+                placeholder="e.g. 50001"
               />
             </Field>
           </div>
@@ -1342,6 +2096,7 @@ function LinkForm({
         form={form}
         set={set}
         toggle={toggle}
+        toggleDay={toggleDay}
         translation={translation}
         setTranslation={setTranslation}
         linkId={undefined}

@@ -54,12 +54,36 @@ export type TradeNotification = {
   sl?: number | null;
   from?: number;
   to?: number;
+  /** Every field a modification changed, e.g. SL and TP moved together. */
+  changes?: AlertChanges;
   pl?: number;
   positionId?: string;
   minutesAgo: number;
   time: string;
   day: "today" | "yesterday";
 };
+
+export type AlertChanges = Partial<
+  Record<"volume" | "sl" | "tp", { from: number | null; to: number | null }>
+>;
+
+const CHANGE_LABELS: Record<keyof AlertChanges, string> = {
+  volume: "Volume",
+  sl: "SL",
+  tp: "TP",
+};
+
+/** "SL 4160.00 → 4155.00 · TP — → 4120.00", or null when nothing is recorded. */
+export function describeChanges(changes: AlertChanges | undefined): string | null {
+  if (!changes) return null;
+  // An SL or TP of 0 means "none" in MT5.
+  const show = (value: number | null) => (value == null || value === 0 ? "—" : price(value));
+  const parts = (Object.keys(CHANGE_LABELS) as (keyof AlertChanges)[]).flatMap((key) => {
+    const change = changes[key];
+    return change ? [`${CHANGE_LABELS[key]} ${show(change.from)} → ${show(change.to)}`] : [];
+  });
+  return parts.length ? parts.join(" · ") : null;
+}
 
 export function toTradeNotification(alert: {
   id: string;
@@ -80,6 +104,7 @@ export function toTradeNotification(alert: {
   };
   from?: number | null;
   to?: number | null;
+  changes?: AlertChanges;
   createdAt: string;
 }): TradeNotification {
   const at = new Date(alert.createdAt);
@@ -101,6 +126,7 @@ export function toTradeNotification(alert: {
     sl: pos.sl != null ? Number(pos.sl) : null,
     ...(alert.from != null ? { from: Number(alert.from) } : {}),
     ...(alert.to != null ? { to: Number(alert.to) } : {}),
+    ...(alert.changes ? { changes: alert.changes } : {}),
     pl: Number(pos.profit ?? 0),
     ...(pos.positionId ? { positionId: String(pos.positionId) } : {}),
     minutesAgo,

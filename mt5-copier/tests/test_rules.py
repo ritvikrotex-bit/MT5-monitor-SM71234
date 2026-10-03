@@ -145,7 +145,69 @@ def test_stops_are_dropped_when_reversing():
 
 
 def test_stops_are_dropped_when_disabled():
-    assert CopyRules(copy_sl_tp=False).stops_for(1950.5, 1975.0) == (0.0, 0.0)
+    assert CopyRules(copy_sl=False, copy_tp=False).stops_for(1950.5, 1975.0) == (0.0, 0.0)
+
+
+def test_sl_and_tp_can_be_copied_separately():
+    assert CopyRules(copy_tp=False).stops_for(1950.5, 1975.0) == (1950.5, 0.0)
+    assert CopyRules(copy_sl=False).stops_for(1950.5, 1975.0) == (0.0, 1975.0)
+
+
+def test_the_old_single_switch_still_loads():
+    assert CopyRules.from_dict({"copySlTp": False}).stops_for(1950.5, 1975.0) == (0.0, 0.0)
+    assert CopyRules.from_dict({}).stops_for(1950.5, 1975.0) == (1950.5, 1975.0)
+
+
+def test_a_trailing_link_takes_none_of_the_masters_levels():
+    rules = CopyRules(exit_mode="TRAILING", trail_drawdown_pct=20)
+    assert rules.stops_for(1950.5, 1975.0) == (0.0, 0.0)
+    assert not rules.follows_stops
+
+
+def test_lot_per_equity_step():
+    rules = CopyRules(lot_mode="EQUITY_STEP", lot_value=0.01, equity_step=1000)
+    scale = lambda equity: rules.scale_volume(1.0, master_balance=1, dest_balance=1,  # noqa: E731
+                                              master_equity=1, dest_equity=equity)
+    assert scale(1000) == pytest.approx(0.01)
+    assert scale(5000) == pytest.approx(0.05)
+    assert scale(5999) == pytest.approx(0.05)  # whole steps only
+    assert scale(999) == 0.0
+
+
+def test_risk_percent_sizing():
+    # 1% of 10,000 = 100 at risk; 10.00 stop with tick 0.01 worth 1.00 -> 1000 per lot
+    rules = CopyRules(lot_mode="RISK_PERCENT", lot_value=1.0)
+    volume = rules.risk_volume(dest_equity=10_000, entry=2000.0, stop=1990.0,
+                               tick_size=0.01, tick_value=1.0)
+    assert volume == pytest.approx(0.1)
+
+
+def test_risk_percent_sizing_needs_a_stop():
+    rules = CopyRules(lot_mode="RISK_PERCENT", lot_value=1.0)
+    with pytest.raises(RuleError, match="needs a stop loss"):
+        rules.risk_volume(dest_equity=10_000, entry=2000.0, stop=0.0, tick_size=0.01, tick_value=1.0)
+
+
+@pytest.mark.parametrize("start,end,days,clock,closed", [
+    ("09:00", "18:00", [], "2026-10-05 10:00", False),
+    ("09:00", "18:00", [], "2026-10-05 08:59", True),
+    ("09:00", "18:00", [], "2026-10-05 18:00", True),
+    ("22:00", "06:00", [], "2026-10-05 23:30", False),  # overnight session
+    ("22:00", "06:00", [], "2026-10-05 07:00", True),
+    ("", "", [0, 1, 2, 3, 4], "2026-10-04 12:00", True),  # a Sunday
+    ("", "", [0, 1, 2, 3, 4], "2026-10-05 12:00", False),  # a Monday
+    ("", "", [], "2026-10-04 03:00", False),  # no session set
+])
+def test_trading_sessions(start, end, days, clock, closed):
+    from datetime import datetime, timezone
+    rules = CopyRules(session_start=start, session_end=end, session_days=days)
+    now = datetime.strptime(clock, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).timestamp()
+    assert (rules.session_closed_reason(now) is not None) is closed
+
+
+def test_a_session_needs_both_ends():
+    with pytest.raises(ValueError, match="both a start and an end"):
+        CopyRules(session_start="09:00")
 
 
 # -- validation ------------------------------------------------------------

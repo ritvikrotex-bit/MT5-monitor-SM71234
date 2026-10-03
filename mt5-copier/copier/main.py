@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -28,12 +29,18 @@ from copier.sources import (
     TerminalMaster,
     manager_symbols,
 )
+from copier.journal import Journal
 from copier.state import StateStore
+from copier.testrun import run_test
 
 log = logging.getLogger("copier.main")
 
+# Identifies this run of the service; see /v1/events.
+BOOT_ID = uuid.uuid4().hex
+
 pool = Pool(settings.terminals_root)
 state = StateStore(settings.state_dir / "copier-state.json")
+journal = Journal(settings.state_dir / "journal.jsonl")
 masters = MasterReader(
     ConnectorClient(settings.connector_url, settings.connector_secret)
     if settings.connector_secret
@@ -47,6 +54,7 @@ engine = Engine(
     poll_interval=settings.poll_interval,
     snapshot_timeout=settings.snapshot_timeout,
     order_timeout=settings.order_timeout,
+    journal=journal,
 )
 
 
@@ -141,7 +149,19 @@ def get_events(limit: int = 100, since: int = -1) -> dict[str, Any]:
     cursor, oldest first, so an alerter cannot miss or repeat one. Omit it to
     read the feed newest first."""
     events = engine.events(min(max(limit, 1), 500), since=since)
-    return {"events": events, "cursor": engine.sequence}
+    # The cursor starts again at zero when this process restarts. The boot id
+    # lets a follower see that happen and read everything since, instead of
+    # mistaking the new, lower numbers for events it has already handled.
+    return {"events": events, "cursor": engine.sequence, "boot": BOOT_ID}
+
+
+@app.get("/v1/journal", dependencies=[Depends(require_secret)])
+def get_journal(links: str = "", since: float = 0.0, limit: int = 500) -> dict[str, Any]:
+    """Copies, newest first, each with its open and close: prices, slippage,
+    latency and result. ``links`` is a comma-separated list of link ids to
+    include; the web app passes the ones the caller owns."""
+    wanted = {link_id for link_id in links.split(",") if link_id} if links else None
+    return {"trades": journal.trades(link_ids=wanted, since=since, limit=min(max(limit, 1), 5000))}
 
 
 @app.post("/v1/accounts/{account_id}/probe", dependencies=[Depends(require_secret)])
@@ -236,6 +256,16 @@ def preview(link_id: str, q: str = "", limit: int = 400) -> dict[str, Any]:
         "destinationTotal": len(dest_names),
         "rows": rows[: max(1, min(limit, 2000))],
     }
+
+
+@app.post("/v1/links/{link_id}/test", dependencies=[Depends(require_secret)])
+def test_link(link_id: str) -> dict[str, Any]:
+    """Check a link end to end without placing an order. Works on a stopped or
+    dry-run link too, so it can be verified before it is armed."""
+    link = engine.links.get(link_id)
+    if link is None:
+        raise HTTPException(status_code=404, detail="unknown link")
+    return run_test(engine, link)
 
 
 @app.post("/v1/links/{link_id}/arm", dependencies=[Depends(require_secret)])

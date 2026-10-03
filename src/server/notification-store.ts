@@ -16,6 +16,13 @@ export type AlertPosition = {
   tp?: number | null | undefined;
   openedAt?: string | null | undefined;
 };
+export type AlertChange = { from: number | null; to: number | null };
+/**
+ * Every field that changed in one modification. `from`/`to` hold a single
+ * change; this holds them all, so SL and TP moved together are both reported.
+ */
+export type AlertChanges = Partial<Record<"volume" | "sl" | "tp", AlertChange>>;
+
 export type StoredAlert = {
   id: string;
   userId: string;
@@ -27,6 +34,7 @@ export type StoredAlert = {
   position: AlertPosition;
   from?: number | null | undefined;
   to?: number | null | undefined;
+  changes?: AlertChanges | undefined;
   createdAt: string;
   telegram: "sent" | "not_configured" | "failed";
   telegramError?: string | undefined;

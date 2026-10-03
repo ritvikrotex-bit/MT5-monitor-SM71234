@@ -51,6 +51,22 @@ class LinkState:
     copied_count: int = 0
     last_action_at: float | None = None
 
+    opened: dict[int, dict[str, Any]] = field(default_factory=dict)
+    """master ticket -> what was copied: master and copy volume at open, so a
+    partial close on the master shrinks the copy by the same share."""
+    day: str | None = None
+    """The destination's server date (YYYY-MM-DD) the daily counters belong to."""
+    trades_today: int = 0
+    notified: dict[str, str] = field(default_factory=dict)
+    """risk trigger -> server date it was last reported, so each limit alerts
+    once a day instead of on every blocked trade."""
+    risk_block: str | None = None
+    """Set by the consecutive-loss limit; copying stays paused until re-armed."""
+    streak_since: float | None = None
+    """UTC time losses are counted from; re-arming starts a fresh streak."""
+    peaks: dict[int, float] = field(default_factory=dict)
+    """master ticket -> highest profit its copy has reached, for trailing."""
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "linkId": self.link_id,
@@ -63,6 +79,13 @@ class LinkState:
             "haltedReason": self.halted_reason,
             "copiedCount": self.copied_count,
             "lastActionAt": self.last_action_at,
+            "opened": {str(k): v for k, v in self.opened.items()},
+            "day": self.day,
+            "tradesToday": self.trades_today,
+            "notified": dict(self.notified),
+            "riskBlock": self.risk_block,
+            "streakSince": self.streak_since,
+            "peaks": {str(k): v for k, v in self.peaks.items()},
         }
 
     @classmethod
@@ -78,6 +101,13 @@ class LinkState:
             halted_reason=raw.get("haltedReason"),
             copied_count=int(raw.get("copiedCount") or 0),
             last_action_at=raw.get("lastActionAt"),
+            opened={int(k): dict(v) for k, v in (raw.get("opened") or {}).items()},
+            day=raw.get("day"),
+            trades_today=int(raw.get("tradesToday") or 0),
+            notified=dict(raw.get("notified") or {}),
+            risk_block=raw.get("riskBlock"),
+            streak_since=raw.get("streakSince"),
+            peaks={int(k): float(v) for k, v in (raw.get("peaks") or {}).items()},
         )
 
     # -- failure backoff ---------------------------------------------------
@@ -155,7 +185,18 @@ class StateStore:
 
     def save(self) -> None:
         with self._lock:
-            payload = {"links": [s.to_dict() for s in self._links.values()]}
+            # Links run on their own threads and change their own state without
+            # this lock, so a dict can change size while it is being read. That
+            # is rare and harmless to retry; it must not crash a cycle.
+            for attempt in range(5):
+                try:
+                    payload = {"links": [s.to_dict() for s in self._links.values()]}
+                    break
+                except RuntimeError:
+                    if attempt == 4:
+                        log.warning("copier state kept changing while saving; will retry next cycle")
+                        return
+                    time.sleep(0.01)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
             try:

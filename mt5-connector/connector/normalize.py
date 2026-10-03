@@ -84,6 +84,17 @@ def _opened_at(obj) -> str | None:
     return None
 
 
+def _opened_at_msc(obj) -> int | None:
+    """Open time in milliseconds on the broker's clock, with its date intact."""
+    msc = getattr(obj, "TimeCreateMsc", None)
+    if isinstance(msc, (int, float)) and msc > 0:
+        return int(msc)
+    ts = getattr(obj, "TimeCreate", None)
+    if isinstance(ts, (int, float)) and ts > 0:
+        return int(ts) * 1000
+    return None
+
+
 def client_from_user(user, account=None, login: int | None = None) -> ClientAccount:
     resolved_login = _int(getattr(user, "Login", None), login or 0) or 0
     balance = _num(getattr(account, "Balance", None) if account is not None else None)
@@ -130,4 +141,5 @@ def position_from_mt(obj) -> OpenPosition:
         sl=sl if sl not in (0, 0.0) else None,
         tp=tp if tp not in (0, 0.0) else None,
         openedAt=_opened_at(obj),
+        openedAtMsc=_opened_at_msc(obj),
     )

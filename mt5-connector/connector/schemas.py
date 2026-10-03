@@ -61,6 +61,9 @@ class OpenPosition(BaseModel):
     sl: float | None = None
     tp: float | None = None
     openedAt: str | None = None
+    # The same moment with its date and milliseconds, on the broker's clock.
+    # The trade copier uses it to measure copy latency.
+    openedAtMsc: int | None = None
 
 
 class SearchResponse(BaseModel):

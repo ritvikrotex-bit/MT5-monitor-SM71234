@@ -214,7 +214,7 @@ function AddBrokerForm({ onDone }: { onDone: () => Promise<void> }) {
           <X className="size-4" />
         </button>
       </div>
-      <Field label="Broker name" value={name} set={setName} placeholder="Wyncrest" />
+      <Field label="Broker name" value={name} set={setName} placeholder="e.g. Your broker's name" />
       <Field label="MT5 server" value={server} set={setServer} placeholder="server:443" />
       <Field
         label="Numeric Manager login"

@@ -20,8 +20,8 @@ export const Route = createFileRoute("/api/copier/accounts/$id/probe")({
           requireCopierPermission(user);
           // Ownership check before touching the service.
           getCopierAccount(user.id, params.id);
-          // The service only holds credentials for accounts a link uses, so a
-          // freshly added account needs a push before it can be probed.
+          // Push first so the service has this account even if the push made
+          // when it was saved failed (the copier was down at the time).
           await pushCopierConfig();
           const snapshot = await probeCopierAccount(params.id);
           return jsonOk(snapshot);

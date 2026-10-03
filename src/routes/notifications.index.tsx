@@ -5,7 +5,12 @@ import { AppShell } from "@/components/mt5/AppShell";
 import { NotificationCard } from "@/components/mt5/cards";
 import { EmptyState, ReadOnlyBadge } from "@/components/mt5/primitives";
 import { store, useAppState } from "@/lib/app-store";
-import { notificationMeta, type NotificationType, type TradeNotification } from "@/lib/mt5-data";
+import {
+  notificationMeta,
+  type AlertChanges,
+  type NotificationType,
+  type TradeNotification,
+} from "@/lib/mt5-data";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/notifications/")({
@@ -159,6 +164,7 @@ function toNotification(alert: {
   };
   from?: number | null;
   to?: number | null;
+  changes?: AlertChanges;
   createdAt: string;
 }): TradeNotification {
   const at = new Date(alert.createdAt);
@@ -177,6 +183,7 @@ function toNotification(alert: {
     sl: alert.position.sl ?? null,
     ...(alert.from != null ? { from: alert.from } : {}),
     ...(alert.to != null ? { to: alert.to } : {}),
+    ...(alert.changes ? { changes: alert.changes } : {}),
     pl: alert.position.profit,
     positionId: alert.position.positionId,
     minutesAgo,

@@ -140,6 +140,7 @@ export function eventTone(kind: string): Tone {
   if (kind === "opened" || kind === "open") return "ok";
   if (kind === "error" || kind === "halted") return "danger";
   if (kind === "skipped" || kind === "duplicate") return "warn";
-  if (kind === "close" || kind === "reduce" || kind === "modify") return "info";
+  if (kind === "close" || kind === "reduce" || kind === "modify" || kind === "refreshed")
+    return "info";
   return "muted";
 }

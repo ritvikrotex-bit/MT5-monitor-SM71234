@@ -36,6 +36,17 @@ class FakeAccount:
         self.tickets = itertools.count(1000 + login)
         self.calls: list[tuple[str, dict]] = []
         self.fail_on: dict[str, Exception] = {}
+        # Symbols the broker has enabled but this terminal only sees after a
+        # fresh login, and per-symbol SYMBOL_TRADE_MODE overrides.
+        self.after_login: list[str] = []
+        self.trade_modes: dict[str, int] = {}
+        self.margin_free = balance
+        # Broker clock offset, closed-deal history, and failures that keep
+        # happening until the test clears them.
+        self.server_offset: float | None = 0.0
+        self.deals: list[dict] = []
+        self.fail_always: dict[str, Exception] = {}
+        self.fill_price = 100.0
 
     def add(self, symbol: str, side: str, volume: float, *, sl: float = 0.0, tp: float = 0.0,
             magic: int = 0, comment: str = "", ticket: int | None = None) -> int:
@@ -52,7 +63,7 @@ class FakeAccount:
     def call(self, cmd: str, args: dict | None = None, *, timeout: float = 0) -> dict:
         args = args or {}
         self.calls.append((cmd, args))
-        error = self.fail_on.pop(cmd, None)
+        error = self.fail_on.pop(cmd, None) or self.fail_always.get(cmd)
         if error is not None:
             raise error
 
@@ -66,12 +77,41 @@ class FakeAccount:
                     "tradeAllowed": self.trade_allowed,
                 },
                 "positions": [dict(p) for p in self.positions.values()],
+                "serverOffset": self.server_offset,
                 "at": 0.0,
             }
+        if cmd == "deals":
+            return {"deals": [d for d in self.deals
+                              if d.get("magic", args["magic"]) == args["magic"]
+                              and d["time"] >= args.get("since", 0)]}
         if cmd == "symbols":
             return {"symbols": list(self.symbols)}
         if cmd == "spec":
-            return {**SPEC, "symbol": args["symbol"]}
+            if args["symbol"] not in self.symbols:
+                raise CommandFailed("SYMBOL_UNKNOWN", f"{args['symbol']} does not exist")
+            return {**SPEC, "symbol": args["symbol"],
+                    "tradeMode": self.trade_modes.get(args["symbol"], 4),
+                    "tickSize": 0.01, "tickValue": 1.0}
+        if cmd == "refresh":
+            before = len(self.symbols)
+            self.symbols = self.symbols + [s for s in self.after_login if s not in self.symbols]
+            self.after_login = []
+            symbol = args.get("symbol")
+            available = None if not symbol else (
+                symbol in self.symbols and self.trade_modes.get(symbol, 4) not in (0, 3))
+            return {"symbolsBefore": before, "symbolsAfter": len(self.symbols),
+                    "symbol": symbol, "available": available,
+                    "reason": None if available in (None, True) else f"{symbol} does not exist"}
+        if cmd == "check":
+            if args["symbol"] not in self.symbols:
+                raise CommandFailed("SYMBOL_UNKNOWN", f"{args['symbol']} does not exist")
+            margin = 100.0 * float(args["volume"])
+            ok = margin <= self.margin_free
+            return {"ok": ok, "retcode": 0 if ok else 10019,
+                    "comment": "Done" if ok else "No money", "symbol": args["symbol"],
+                    "volume": float(args["volume"]), "price": 100.0, "margin": margin,
+                    "marginFree": self.margin_free - margin, "equity": self.equity,
+                    "terminalTradeAllowed": True}
         if cmd == "open":
             ticket = self.add(
                 args["symbol"], args["side"], args["volume"],
@@ -79,7 +119,7 @@ class FakeAccount:
                 magic=args.get("magic", 0), comment=args.get("comment", ""),
             )
             return {"retcode": 10009, "order": ticket, "deal": ticket,
-                    "volume": args["volume"], "price": 100.0, "comment": ""}
+                    "volume": args["volume"], "price": self.fill_price, "comment": ""}
         if cmd == "close":
             ticket = int(args["ticket"])
             position = self.positions.get(ticket)

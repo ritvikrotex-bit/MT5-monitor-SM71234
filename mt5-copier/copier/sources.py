@@ -209,6 +209,9 @@ class MasterReader:
                 # The Manager API only gives a wall-clock time of day here, so
                 # the ticket stands in for age: MT5 hands them out in order.
                 "openedAt": ticket,
+                # Broker clock, milliseconds, when the connector reports it;
+                # the engine learns that clock's offset to measure latency.
+                "openedAtMsc": int(raw.get("openedAtMsc") or 0),
             })
         return {"account": account, "positions": positions, "at": time.time()}
 

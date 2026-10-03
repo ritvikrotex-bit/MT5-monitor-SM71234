@@ -56,15 +56,41 @@ export type CopierRules = {
   autoMatch: boolean;
   allowSymbols: string[];
   denySymbols: string[];
-  lotMode: "FIXED" | "MULTIPLIER" | "BALANCE" | "EQUITY";
+  /**
+   * EQUITY_STEP: lotValue lots per equityStep of slave equity ($1,000 → 0.01).
+   * RISK_PERCENT: lotValue is the % of slave equity lost if the master's SL is hit.
+   */
+  lotMode: "FIXED" | "MULTIPLIER" | "BALANCE" | "EQUITY" | "EQUITY_STEP" | "RISK_PERCENT";
   lotValue: number;
+  equityStep: number;
   maxLot: number;
   minVolumeAction: "SKIP" | "MIN";
   reverse: boolean;
-  copySlTp: boolean;
+  /** Follow the master's stop loss / take profit, each on its own switch. */
+  copySl: boolean;
+  copyTp: boolean;
+  /** Legacy single switch, read for links saved before SL and TP were split. */
+  copySlTp?: boolean;
   copyExisting: boolean;
   maxOpenPositions: number;
   maxSlippagePoints: number;
+  // Risk limits; 0 or empty is off. Days and hours are the slave broker's
+  // server time. When one trips, new copies stop and open ones stay managed.
+  maxTradesPerDay: number;
+  maxBuyLots: number;
+  maxSellLots: number;
+  sessionStart: string;
+  sessionEnd: string;
+  /** 0 = Monday … 6 = Sunday; empty means every day. */
+  sessionDays: number[];
+  maxDailyLoss: number;
+  maxConsecutiveLosses: number;
+  /** A copy whose loss reaches this is closed on its own, even if the master stays open. */
+  maxLossPerTrade: number;
+  /** MASTER follows the master's SL/TP; TRAILING lets the slave trail its own profit. */
+  exitMode: "MASTER" | "TRAILING";
+  trailActivation: number;
+  trailDrawdownPct: number;
 };
 
 /**
@@ -104,17 +130,50 @@ export const DEFAULT_RULES: CopierRules = {
   denySymbols: [],
   lotMode: "BALANCE",
   lotValue: 1,
+  equityStep: 1000,
   maxLot: 0,
   minVolumeAction: "SKIP",
   reverse: false,
-  copySlTp: true,
+  copySl: true,
+  copyTp: true,
   copyExisting: false,
   maxOpenPositions: 0,
   maxSlippagePoints: 20,
+  maxTradesPerDay: 0,
+  maxBuyLots: 0,
+  maxSellLots: 0,
+  sessionStart: "",
+  sessionEnd: "",
+  sessionDays: [],
+  maxDailyLoss: 0,
+  maxConsecutiveLosses: 0,
+  maxLossPerTrade: 0,
+  exitMode: "MASTER",
+  trailActivation: 0,
+  trailDrawdownPct: 0,
 };
 
-const LOT_MODES = ["FIXED", "MULTIPLIER", "BALANCE", "EQUITY"] as const;
+const LOT_MODES = [
+  "FIXED",
+  "MULTIPLIER",
+  "BALANCE",
+  "EQUITY",
+  "EQUITY_STEP",
+  "RISK_PERCENT",
+] as const;
 const MIN_VOLUME_ACTIONS = ["SKIP", "MIN"] as const;
+const EXIT_MODES = ["MASTER", "TRAILING"] as const;
+const HHMM = /^([01]?\d|2[0-3]):[0-5]\d$/;
+
+/** A non-negative number from a form field, or the fallback. */
+function nonNegative(value: unknown, fallback: number, label: string): number {
+  if (value === undefined || value === null || value === "") return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new ApiError("INVALID_RULES", `${label} cannot be negative.`, 400);
+  }
+  return n;
+}
 const ROLES = ["MASTER", "DESTINATION", "BOTH"] as const;
 
 function normaliseRole(role: unknown): CopierAccountRole {
@@ -272,6 +331,16 @@ export function listCopierLinks(userId: string): StoredCopierLink[] {
   return readAll().links.filter((l) => l.ownerUserId === userId);
 }
 
+/** Users with at least one running link: who to tell when the copier itself stops. */
+export function enabledCopierLinkOwners(): Map<string, string[]> {
+  const owners = new Map<string, string[]>();
+  for (const link of readAll().links) {
+    if (!link.enabled) continue;
+    owners.set(link.ownerUserId, [...(owners.get(link.ownerUserId) ?? []), link.label]);
+  }
+  return owners;
+}
+
 export function getCopierLink(userId: string, id: string): StoredCopierLink {
   const row = readAll().links.find((l) => l.id === id);
   if (!row || row.ownerUserId !== userId) {
@@ -291,6 +360,40 @@ export function normaliseRules(input: Partial<CopierRules> | undefined): CopierR
   if (!Number.isFinite(maxLot) || maxLot < 0) {
     throw new ApiError("INVALID_RULES", "The maximum lot cannot be negative.", 400);
   }
+  if (lotMode === "RISK_PERCENT" && lotValue > 100) {
+    throw new ApiError("INVALID_RULES", "The risk per trade cannot exceed 100% of equity.", 400);
+  }
+  const equityStep = nonNegative(raw.equityStep, DEFAULT_RULES.equityStep, "The equity step");
+  if (equityStep <= 0) {
+    throw new ApiError("INVALID_RULES", "The equity step must be greater than zero.", 400);
+  }
+
+  const sessionStart = String(raw.sessionStart ?? "").trim();
+  const sessionEnd = String(raw.sessionEnd ?? "").trim();
+  if ((sessionStart === "") !== (sessionEnd === "")) {
+    throw new ApiError("INVALID_RULES", "A trading session needs both a start and an end.", 400);
+  }
+  for (const value of [sessionStart, sessionEnd]) {
+    if (value && !HHMM.test(value)) {
+      throw new ApiError("INVALID_RULES", `Session times look like 09:00, not "${value}".`, 400);
+    }
+  }
+
+  const exitMode = EXIT_MODES.includes(raw.exitMode as never) ? raw.exitMode! : "MASTER";
+  const trailDrawdownPct = nonNegative(raw.trailDrawdownPct, 0, "The trailing drawdown");
+  if (trailDrawdownPct >= 100) {
+    throw new ApiError("INVALID_RULES", "The trailing drawdown must be under 100%.", 400);
+  }
+  if (exitMode === "TRAILING" && trailDrawdownPct <= 0) {
+    throw new ApiError(
+      "INVALID_RULES",
+      "Trailing needs a drawdown percentage, e.g. 20% to exit at 80% of the peak profit.",
+      400,
+    );
+  }
+
+  // Links saved before SL and TP had separate switches carry one copySlTp.
+  const legacyStops = raw.copySlTp ?? true;
   return {
     symbolMap: Object.fromEntries(
       Object.entries(raw.symbolMap ?? {})
@@ -303,15 +406,33 @@ export function normaliseRules(input: Partial<CopierRules> | undefined): CopierR
     denySymbols: (raw.denySymbols ?? []).map((s) => String(s).trim()).filter(Boolean),
     lotMode,
     lotValue,
+    equityStep,
     maxLot,
     minVolumeAction: MIN_VOLUME_ACTIONS.includes(raw.minVolumeAction as never)
       ? raw.minVolumeAction!
       : DEFAULT_RULES.minVolumeAction,
     reverse: Boolean(raw.reverse),
-    copySlTp: raw.copySlTp ?? true,
+    copySl: raw.copySl ?? legacyStops,
+    copyTp: raw.copyTp ?? legacyStops,
     copyExisting: Boolean(raw.copyExisting),
     maxOpenPositions: Math.max(0, Number(raw.maxOpenPositions ?? 0) || 0),
     maxSlippagePoints: Math.max(0, Number(raw.maxSlippagePoints ?? 20) || 0),
+    maxTradesPerDay: Math.floor(nonNegative(raw.maxTradesPerDay, 0, "Max trades per day")),
+    maxBuyLots: nonNegative(raw.maxBuyLots, 0, "Max BUY lots"),
+    maxSellLots: nonNegative(raw.maxSellLots, 0, "Max SELL lots"),
+    sessionStart,
+    sessionEnd,
+    sessionDays: [...new Set((raw.sessionDays ?? []).map(Number))]
+      .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+      .sort(),
+    maxDailyLoss: nonNegative(raw.maxDailyLoss, 0, "Max daily loss"),
+    maxConsecutiveLosses: Math.floor(
+      nonNegative(raw.maxConsecutiveLosses, 0, "Max consecutive losses"),
+    ),
+    maxLossPerTrade: nonNegative(raw.maxLossPerTrade, 0, "Max loss per trade"),
+    exitMode,
+    trailActivation: nonNegative(raw.trailActivation, 0, "The trailing activation profit"),
+    trailDrawdownPct,
   };
 }
 
@@ -472,8 +593,6 @@ export async function buildCopierServiceConfig(): Promise<CopierServiceConfig> {
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const usable: StoredCopierLink[] = [];
   const masters: Record<string, unknown>[] = [];
-  /** Accounts that need a terminal: every destination, plus terminal-read masters. */
-  const needed = new Set<string>();
 
   for (const link of links) {
     if (!byId.has(link.destAccountId)) {
@@ -515,19 +634,19 @@ export async function buildCopierServiceConfig(): Promise<CopierServiceConfig> {
         label: `${source.label} (${source.login})`,
         accountId: source.id,
       };
-      needed.add(source.id);
     }
 
     usable.push(link);
     masters.push(master);
-    needed.add(link.destAccountId);
   }
 
-  // Only ship credentials for accounts a usable link actually needs, so an
-  // unused account never causes a terminal to start or a login to be attempted.
+  // Ship every account, linked or not. "Test login" and the symbol lookup in
+  // the link form both run before any link exists, and the service answers
+  // "no worker for account" for an account it was never sent. Its workers are
+  // lazy, so an account with no link still never starts a terminal or attempts
+  // a login until one of those is asked for.
   const payload: CopierServiceConfig["accounts"] = [];
   for (const account of accounts) {
-    if (!needed.has(account.id)) continue;
     payload.push({
       id: account.id,
       label: `${account.label} (${account.login})`,

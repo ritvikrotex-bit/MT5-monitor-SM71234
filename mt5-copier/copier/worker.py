@@ -45,6 +45,29 @@ CONNECT_TIMEOUT_MS = 120_000
 # Anything else (bad password, unknown server) will not fix itself.
 RETRY_CONNECT_CODES = frozenset({-10005, -10003, -10004})
 
+# A terminal that drops its broker connection reconnects by itself, usually
+# within seconds. Re-initializing it in the middle of that only slows it down
+# and, worse, outlasts the caller's timeout so the whole worker gets killed.
+# So a disconnect is waited out briefly and reported, and only a long one is
+# kicked with a fresh login.
+RECONNECT_WAIT = 8.0
+RELOGIN_AFTER = 90.0
+LOGIN_TIMEOUT_MS = 60_000
+
+# After a re-login the terminal downloads the broker's symbol list again. Wait
+# for that count to settle before reading it, or a just-enabled symbol can
+# still look missing.
+SYMBOL_SETTLE_WAIT = 20.0
+
+# MT5 has no "server time" call; the broker's clock is read off its newest
+# quote. That is only trustworthy while quotes are fresh, so a reading is kept
+# for a while and replaced only by another clean one.
+OFFSET_TTL = 600.0
+OFFSET_MAX_STALENESS = 600.0
+
+# DEAL_ENTRY_* values that close (part of) a position.
+_CLOSING_ENTRIES = frozenset({1, 2, 3})  # OUT, INOUT, OUT_BY
+
 # Symbol filling bitmask (SYMBOL_FILLING_*) -> order filling constant.
 _FILLING_CHOICES = (
     (1, mt5.ORDER_FILLING_FOK),
@@ -68,6 +91,30 @@ class Terminal:
         self.password = password
         self.server = server
         self._ready = False
+        self._disconnected_since: float | None = None
+        self._offset: float | None = None
+        self._offset_at = 0.0
+
+    def server_offset(self) -> float | None:
+        """Seconds the broker's clock runs ahead of UTC (e.g. 10800 for GMT+3).
+
+        Taken from the newest quote across Market Watch and rounded to the half
+        hour, which absorbs the few seconds a quote is old. Returns the last
+        good reading, or None before there has been one.
+        """
+        now = time.time()
+        if self._offset is not None and now - self._offset_at < OFFSET_TTL:
+            return self._offset
+        newest = 0
+        for info in mt5.symbols_get() or []:
+            if getattr(info, "visible", False):
+                newest = max(newest, int(getattr(info, "time", 0) or 0))
+        if newest:
+            raw = newest - now
+            offset = round(raw / 1800) * 1800
+            if abs(offset) <= 14 * 3600 and abs(raw - offset) <= OFFSET_MAX_STALENESS:
+                self._offset, self._offset_at = float(offset), now
+        return self._offset
 
     def connect(self) -> None:
         if self._ready and mt5.terminal_info() is not None:
@@ -112,13 +159,80 @@ class Terminal:
                 f"terminal {self.terminal} is logged in as {info.login}, expected {self.login}",
             )
         self._ready = True
+        self._disconnected_since = None
         log.info("attached to %s on %s", info.login, info.server)
 
-    def ensure(self) -> None:
-        info = mt5.terminal_info()
-        if info is None or not info.connected:
+    def relogin(self) -> None:
+        """Log the account in again on the running terminal.
+
+        This is what makes the terminal fetch the broker's current symbol list
+        and group settings, so an instrument the broker enabled after we
+        connected becomes visible. Falls back to a full reconnect if the
+        terminal itself is gone.
+        """
+        if mt5.terminal_info() is None:
             self._ready = False
-        self.connect()
+            self.connect()
+            return
+        ok = mt5.login(
+            self.login, password=self.password, server=self.server, timeout=LOGIN_TIMEOUT_MS
+        )
+        if not ok:
+            log.warning("re-login failed (%s); reconnecting the terminal", mt5.last_error())
+            self._ready = False
+            self.connect()
+            return
+        info = mt5.account_info()
+        if info is None or int(info.login) != self.login:
+            self._ready = False
+            self.connect()
+            return
+        self._ready = True
+        self._disconnected_since = None
+        log.info("logged in again as %s on %s", info.login, info.server)
+
+    def ensure(self) -> None:
+        """Make sure we are attached, logged in and connected to the broker."""
+        info = mt5.terminal_info()
+        if info is None or not self._ready:
+            # The IPC link itself is gone (terminal closed or crashed).
+            self._ready = False
+            self.connect()
+            info = mt5.terminal_info()
+
+        if info is not None and not info.connected:
+            deadline = time.time() + RECONNECT_WAIT
+            while time.time() < deadline:
+                time.sleep(0.5)
+                info = mt5.terminal_info()
+                if info is None or info.connected:
+                    break
+            if info is None:
+                self._ready = False
+                self.connect()
+            elif not info.connected:
+                now = time.time()
+                self._disconnected_since = self._disconnected_since or now
+                if now - self._disconnected_since >= RELOGIN_AFTER:
+                    log.warning("broker connection down for %.0fs; logging in again",
+                                now - self._disconnected_since)
+                    self._disconnected_since = now  # one kick per interval
+                    self.relogin()
+                    info = mt5.terminal_info()
+                if info is None or not info.connected:
+                    raise WorkerError(
+                        "BROKER_DISCONNECTED",
+                        "the terminal has lost its connection to the broker; "
+                        "it is reconnecting on its own",
+                    )
+        self._disconnected_since = None
+
+        # Connected, but the account can still have been logged out underneath
+        # us (password changed, session kicked by the server).
+        account = mt5.account_info()
+        if account is None or int(account.login) != self.login:
+            log.warning("account %s is no longer logged in; logging in again", self.login)
+            self.relogin()
 
     def close(self) -> None:
         try:
@@ -176,6 +290,8 @@ def _position_dict(pos) -> dict[str, Any]:
         "magic": int(pos.magic),
         "comment": pos.comment or "",
         "openedAt": int(pos.time),
+        # Broker clock, milliseconds: subtract serverOffset for UTC.
+        "openedAtMsc": int(getattr(pos, "time_msc", 0) or 0),
     }
 
 
@@ -231,7 +347,13 @@ def cmd_snapshot(term: Terminal, _: dict[str, Any]) -> dict[str, Any]:
     if info is None:
         raise WorkerError("NOT_CONNECTED", f"account_info failed: {mt5.last_error()}")
     positions = mt5.positions_get()
+    terminal = mt5.terminal_info()
     return {
+        "terminal": {
+            "connected": bool(terminal.connected) if terminal else False,
+            # The AutoTrading toggle; with it off every order is refused.
+            "tradeAllowed": bool(terminal.trade_allowed) if terminal else False,
+        },
         "account": {
             "login": int(info.login),
             "name": info.name,
@@ -250,6 +372,7 @@ def cmd_snapshot(term: Terminal, _: dict[str, Any]) -> dict[str, Any]:
             "tradeAllowed": bool(info.trade_allowed),
         },
         "positions": [_position_dict(p) for p in (positions or [])],
+        "serverOffset": term.server_offset(),
         "at": time.time(),
     }
 
@@ -272,11 +395,50 @@ def cmd_spec(term: Terminal, args: dict[str, Any]) -> dict[str, Any]:
         "stopsLevel": int(info.trade_stops_level),
         "point": float(info.point),
         "tradeMode": int(info.trade_mode),
+        # What one tick is worth for one lot, in the account currency: what
+        # risk-based sizing turns a stop distance into money with.
+        "tickSize": float(getattr(info, "trade_tick_size", 0) or 0),
+        "tickValue": float(getattr(info, "trade_tick_value", 0) or 0),
     }
 
 
-def cmd_open(term: Terminal, args: dict[str, Any]) -> dict[str, Any]:
+def cmd_deals(term: Terminal, args: dict[str, Any]) -> dict[str, Any]:
+    """Deals of one magic number since a broker-clock time.
+
+    The closing deals give each copy's realized result (profit, swap and
+    commission), which the daily-loss and losing-streak limits are built on.
+    Opening deals are included for their commission.
+    """
     term.ensure()
+    magic = int(args["magic"])
+    since = int(args.get("since") or 0)
+    # Generous bounds on both sides; the exact cut is made on deal.time, which
+    # is on the same broker clock as ``since``.
+    offset = term.server_offset() or 0
+    deals = mt5.history_deals_get(max(since - 86_400, 0), int(time.time() + offset + 2 * 86_400))
+    out = []
+    for deal in deals or []:
+        if int(deal.magic) != magic or int(deal.time) < since:
+            continue
+        out.append({
+            "ticket": int(deal.ticket),
+            "positionId": int(deal.position_id),
+            "time": int(deal.time),
+            "timeMsc": int(getattr(deal, "time_msc", 0) or 0),
+            "closing": int(deal.entry) in _CLOSING_ENTRIES,
+            "symbol": deal.symbol,
+            "volume": float(deal.volume),
+            "price": float(deal.price),
+            "profit": float(deal.profit),
+            "swap": float(deal.swap),
+            "commission": float(deal.commission),
+        })
+    return {"deals": out, "serverOffset": offset}
+
+
+def _market_request(args: dict[str, Any]) -> dict[str, Any]:
+    """The market order a copy sends. Shared by ``open`` and ``check`` so a
+    test run validates exactly what a real copy would send."""
     symbol = str(args["symbol"])
     side = mt5.ORDER_TYPE_BUY if str(args["side"]).upper() == "BUY" else mt5.ORDER_TYPE_SELL
     info = _symbol(symbol)
@@ -296,7 +458,80 @@ def cmd_open(term: Terminal, args: dict[str, Any]) -> dict[str, Any]:
         value = args.get(key)
         if value:
             request[key] = float(value)
-    return _send(request)
+    return request
+
+
+def cmd_open(term: Terminal, args: dict[str, Any]) -> dict[str, Any]:
+    term.ensure()
+    return _send(_market_request(args))
+
+
+def cmd_check(term: Terminal, args: dict[str, Any]) -> dict[str, Any]:
+    """Ask the broker whether an order would be accepted, without sending it.
+
+    ``order_check`` runs the server's own validation (symbol tradable, volume,
+    stops, margin) and places nothing.
+    """
+    term.ensure()
+    request = _market_request(args)
+    result = mt5.order_check(request)
+    if result is None:
+        raise WorkerError("CHECK_FAILED", f"order_check returned None: {mt5.last_error()}")
+    retcode = int(result.retcode)
+    terminal = mt5.terminal_info()
+    return {
+        # order_check reports success as 0 ("Done"), not TRADE_RETCODE_DONE.
+        "ok": retcode in (0, mt5.TRADE_RETCODE_DONE),
+        "retcode": retcode,
+        "comment": result.comment or "",
+        "symbol": request["symbol"],
+        "volume": float(request["volume"]),
+        "price": float(request["price"]),
+        "margin": float(result.margin),
+        "marginFree": float(result.margin_free),
+        "equity": float(result.equity),
+        # The AutoTrading toggle: with it off, order_send is refused even when
+        # order_check passes.
+        "terminalTradeAllowed": bool(terminal.trade_allowed) if terminal else False,
+    }
+
+
+def cmd_refresh(term: Terminal, args: dict[str, Any]) -> dict[str, Any]:
+    """Log the account in again and report whether ``symbol`` is now tradable."""
+    before = int(mt5.symbols_total() or 0)
+    term.relogin()
+
+    # Let the symbol list finish downloading before we look at it.
+    deadline = time.time() + SYMBOL_SETTLE_WAIT
+    count, stable_since = before, time.time()
+    while time.time() < deadline:
+        time.sleep(1.0)
+        current = int(mt5.symbols_total() or 0)
+        if current != count:
+            count, stable_since = current, time.time()
+        elif current and time.time() - stable_since >= 3.0:
+            break
+
+    symbol = str(args.get("symbol") or "")
+    available: bool | None = None
+    reason: str | None = None
+    if symbol:
+        try:
+            info = _symbol(symbol)
+            # 0 disabled, 3 close only: present but cannot open new trades.
+            available = int(info.trade_mode) not in (0, 3)
+            if not available:
+                reason = f"{symbol} is listed but the broker does not allow opening trades on it"
+        except WorkerError as exc:
+            available = False
+            reason = str(exc)
+    return {
+        "symbolsBefore": before,
+        "symbolsAfter": int(mt5.symbols_total() or 0),
+        "symbol": symbol or None,
+        "available": available,
+        "reason": reason,
+    }
 
 
 def cmd_close(term: Terminal, args: dict[str, Any]) -> dict[str, Any]:
@@ -355,6 +590,9 @@ COMMANDS = {
     "symbols": cmd_symbols,
     "spec": cmd_spec,
     "open": cmd_open,
+    "check": cmd_check,
+    "refresh": cmd_refresh,
+    "deals": cmd_deals,
     "close": cmd_close,
     "modify": cmd_modify,
 }

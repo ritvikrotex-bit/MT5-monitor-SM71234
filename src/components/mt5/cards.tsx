@@ -1,7 +1,14 @@
 import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { brokerName } from "@/lib/app-store";
-import { ago, notificationMeta, price, signedMoney, type TradeNotification } from "@/lib/mt5-data";
+import {
+  ago,
+  describeChanges,
+  notificationMeta,
+  price,
+  signedMoney,
+  type TradeNotification,
+} from "@/lib/mt5-data";
 
 const toneClass = {
   positive: "border-positive/35 bg-positive/12 text-positive",
@@ -59,10 +66,15 @@ export function NotificationCard({
           {n.price !== undefined && (
             <span className="text-muted-foreground">@ {price(n.price)}</span>
           )}
-          {n.from !== undefined && n.to !== undefined && (
-            <span className="text-warning">
-              {price(n.from)} → {price(n.to)}
-            </span>
+          {describeChanges(n.changes) ? (
+            <span className="text-warning">{describeChanges(n.changes)}</span>
+          ) : (
+            n.from !== undefined &&
+            n.to !== undefined && (
+              <span className="text-warning">
+                {price(n.from)} → {price(n.to)}
+              </span>
+            )
           )}
           {n.pl !== undefined && (
             <span className={n.pl >= 0 ? "text-positive" : "text-negative"}>

@@ -7,6 +7,7 @@ import {
   readSnapshot,
   snapshotKey,
   writeSnapshot,
+  type AlertChanges,
   type AlertPosition,
   type AlertType,
   type StoredAlert,
@@ -14,7 +15,7 @@ import {
 import { sendTelegramAlert } from "./telegram";
 import type { SessionUser } from "./session";
 import { getUserById } from "./user-store";
-import { monitorPollIntervalMs } from "./env";
+import { clientAlertsEnabled, monitorPollIntervalMs } from "./env";
 
 const same = (a: number | null | undefined, b: number | null | undefined) =>
   (a ?? null) === (b ?? null);
@@ -71,8 +72,14 @@ async function alert(
   from?: number | null,
   to?: number | null,
   brokerName?: string,
+  changes?: AlertChanges,
 ) {
-  const fingerprint = `${item.brokerId}:${item.login}:${type}:${position.positionId}:${from ?? ""}:${to ?? ""}`;
+  const changeKey = changes
+    ? Object.entries(changes)
+        .map(([field, c]) => `${field}=${c?.from ?? ""}>${c?.to ?? ""}`)
+        .join(",")
+    : "";
+  const fingerprint = `${item.brokerId}:${item.login}:${type}:${position.positionId}:${from ?? ""}:${to ?? ""}:${changeKey}`;
   if (isDuplicateAlert(fingerprint)) {
     console.log(`[MT5 Alerting] Suppressed duplicate alert: ${fingerprint}`);
     return;
@@ -89,6 +96,7 @@ async function alert(
     position,
     ...(from !== undefined ? { from } : {}),
     ...(to !== undefined ? { to } : {}),
+    ...(changes ? { changes } : {}),
     createdAt: new Date().toISOString(),
     telegram: "not_configured",
   };
@@ -111,6 +119,10 @@ export async function pollMonitoredClient(
   user: SessionUser,
   item: MonitoredClient,
 ): Promise<{ baseline: boolean; alerts: number; error?: boolean }> {
+  // Every path that produces client alerts comes through here: the background
+  // poller, the first poll when a client is added, and /api/alerts/poll.
+  if (!clientAlertsEnabled()) return { baseline: false, alerts: 0 };
+
   const clientLockKey = snapshotKey(user.id, item.brokerId, item.login);
   const activePolls = globalThis.__mt5_active_client_polls__!;
   if (activePolls.has(clientLockKey)) {
@@ -189,15 +201,24 @@ export async function pollMonitoredClient(
         );
         alerts++;
       } else if (volumeChanged || slChanged || tpChanged) {
-        // Multiple parameters changed simultaneously -> single position_modified notification
+        // Several fields changed at once (most often SL and TP moved together):
+        // one position_modified alert that carries every change, so none of
+        // them is lost. from/to stay volume-only, and only when it changed, so
+        // an unchanged volume is never shown as "4 → 4".
+        const changes: AlertChanges = {
+          ...(volumeChanged ? { volume: { from: old.volume, to: position.volume } } : {}),
+          ...(slChanged ? { sl: { from: old.sl ?? null, to: position.sl ?? null } } : {}),
+          ...(tpChanged ? { tp: { from: old.tp ?? null, to: position.tp ?? null } } : {}),
+        };
         await alert(
           user,
           item,
           "position_modified",
           position,
-          old.volume,
-          position.volume,
+          volumeChanged ? old.volume : undefined,
+          volumeChanged ? position.volume : undefined,
           brokerName,
+          changes,
         );
         alerts++;
       }
@@ -293,6 +314,14 @@ export function startBackgroundPoller(): void {
   if (globalThis.__mt5_poller_timer__) {
     clearInterval(globalThis.__mt5_poller_timer__);
     globalThis.__mt5_poller_timer__ = undefined;
+  }
+
+  if (!clientAlertsEnabled()) {
+    console.log(
+      "[MT5 Alerting] Client alerts are off on this instance (MONITOR_CLIENT_ALERTS=off); " +
+        "another instance is expected to send them.",
+    );
+    return;
   }
 
   const intervalMs = monitorPollIntervalMs();

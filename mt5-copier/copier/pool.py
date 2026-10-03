@@ -32,6 +32,11 @@ RESTART_BACKOFF = (2, 5, 15, 30, 60)
 # connect retries.
 STARTUP_TIMEOUT = 600.0
 
+# Worker error codes that describe the account's connection, not one command.
+CONNECTION_CODES = frozenset({
+    "BROKER_DISCONNECTED", "NOT_CONNECTED", "CONNECT_FAILED", "WRONG_ACCOUNT",
+})
+
 
 class WorkerDown(Exception):
     """The worker is not running, or did not answer in time."""
@@ -75,6 +80,9 @@ class Worker:
         self._failures = 0
         self._next_try = 0.0
         self.last_error: str | None = None
+        self.starts = 0
+        self.started_at: float | None = None
+        self.last_ok_at: float | None = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -89,26 +97,36 @@ class Worker:
         if time.time() < self._next_try:
             raise WorkerDown(f"{self.account.label}: backing off ({self.last_error})")
 
-        exe = terminals.provision(
-            self.account.server, self.account.login, root=self.terminals_root
-        )
-        log.info("starting worker for %s (%s)", self.account.label, self.account.login)
-        self._proc = subprocess.Popen(
-            [
-                self.python, "-u", "-m", "copier.worker",
-                "--login", str(self.account.login),
-                "--server", self.account.server,
-                "--terminal", str(exe),
-                "--label", self.account.label,
-            ],
-            cwd=str(Path(__file__).resolve().parent.parent),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=None,  # worker logs flow into ours
-            text=True,
-            encoding="utf-8",
-            bufsize=1,
-        )
+        # Setting up the terminal can fail for reasons that will not fix
+        # themselves within a second (no MT5 install to copy, a full disk).
+        # Those go through the same backoff as a failed login, instead of
+        # being retried on every engine cycle.
+        try:
+            exe = terminals.provision(
+                self.account.server, self.account.login, root=self.terminals_root
+            )
+            log.info("starting worker for %s (%s)", self.account.label, self.account.login)
+            self._proc = subprocess.Popen(
+                [
+                    self.python, "-u", "-m", "copier.worker",
+                    "--login", str(self.account.login),
+                    "--server", self.account.server,
+                    "--terminal", str(exe),
+                    "--label", self.account.label,
+                ],
+                cwd=str(Path(__file__).resolve().parent.parent),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=None,  # worker logs flow into ours
+                text=True,
+                encoding="utf-8",
+                bufsize=1,
+            )
+        except (OSError, ValueError) as exc:
+            self._record_failure(f"could not start the terminal: {exc}")
+            raise WorkerDown(f"{self.account.label}: could not start the terminal: {exc}") from exc
+        self.starts += 1
+        self.started_at = time.time()
         # The password goes over the pipe, never on the command line.
         assert self._proc.stdin is not None
         self._proc.stdin.write(self.account.password + "\n")
@@ -215,9 +233,16 @@ class Worker:
                 raise
 
         if reply.get("ok"):
+            self.last_ok_at = time.time()
+            self.last_error = None
             return reply.get("result") or {}
         error = reply.get("error") or {}
-        raise CommandFailed(error.get("code", "UNKNOWN"), error.get("message", ""))
+        code = error.get("code", "UNKNOWN")
+        if code in CONNECTION_CODES:
+            # The process is fine but the account is not usable right now;
+            # surface it on the account rather than only in one link's cycle.
+            self.last_error = error.get("message", code)
+        raise CommandFailed(code, error.get("message", ""))
 
 
 class Pool:
@@ -258,6 +283,10 @@ class Pool:
                 **worker.account.redacted(),
                 "running": worker.alive,
                 "lastError": worker.last_error,
+                "lastOkAt": worker.last_ok_at,
+                "startedAt": worker.started_at,
+                # More than one start means the worker has been restarted.
+                "starts": worker.starts,
             }
             for account_id, worker in workers.items()
         }

@@ -372,7 +372,8 @@ function SettingsPage() {
                   <p className="text-xs text-muted-foreground">
                     {key === "new_position" && "When a monitored client opens a trade"}
                     {key === "position_closed" && "When a monitored client closes a trade"}
-                    {key === "position_modified" && "Volume or partial close changes"}
+                    {key === "position_modified" &&
+                      "Volume or partial close changes, or SL and TP moved together"}
                     {key === "sl_modified" && "Stop-loss level updates"}
                     {key === "tp_modified" && "Take-profit level updates"}
                   </p>
