@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Activity,
   AlertCircle,
@@ -57,6 +57,11 @@ function LoginPage() {
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // False in the server-rendered HTML and until the page's JavaScript runs. A
+  // click before then would fall back to a plain form submit that reloads the
+  // page ("/?") and signs nobody in, so the buttons wait for this.
+  const [ready, setReady] = useState(false);
+  useEffect(() => setReady(true), []);
 
   const resetMessages = () => {
     setError(null);
@@ -354,10 +359,10 @@ function LoginPage() {
 
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || !ready}
                 className="w-full rounded-lg bg-primary py-3 text-sm font-semibold text-primary-foreground transition-opacity active:opacity-90 disabled:opacity-50"
               >
-                {submitting ? "Submitting request…" : "Submit Access Request"}
+                {!ready ? "Loading…" : submitting ? "Submitting request…" : "Submit Access Request"}
               </button>
 
               <div className="pt-2 text-center">
@@ -453,18 +458,20 @@ function LoginPage() {
 
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || !ready}
                 className={`w-full rounded-lg py-3 text-sm font-semibold transition-opacity active:opacity-90 disabled:opacity-50 ${
                   mode === "admin-login"
                     ? "bg-amber-600 text-white hover:bg-amber-700 dark:bg-amber-500 dark:hover:bg-amber-600"
                     : "bg-primary text-primary-foreground"
                 }`}
               >
-                {submitting
-                  ? "Verifying credentials…"
-                  : mode === "admin-login"
-                    ? "Sign in to Admin CRM"
-                    : "Sign in to Monitor"}
+                {!ready
+                  ? "Loading…"
+                  : submitting
+                    ? "Verifying credentials…"
+                    : mode === "admin-login"
+                      ? "Sign in to Admin CRM"
+                      : "Sign in to Monitor"}
               </button>
 
               {mode === "user-login" && (
