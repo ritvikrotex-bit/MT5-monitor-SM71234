@@ -42,6 +42,16 @@ class WorkerDown(Exception):
     """The worker is not running, or did not answer in time."""
 
 
+class TerminalStarting(WorkerDown):
+    """The account's terminal is being started in the background."""
+
+
+STARTING = (
+    "Starting this account's MT5 terminal. That can take a few minutes; the account shows"
+    " 'terminal connected' when it is ready, or why it could not start."
+)
+
+
 class CommandFailed(Exception):
     """The worker answered, but the command itself failed."""
 
@@ -81,7 +91,9 @@ class Worker:
         self._next_try = 0.0
         self.last_error: str | None = None
         self.ready = False  # the terminal answered; False while it is still starting
+        self._starting = False
         self.starts = 0
+        self.connects = 0  # starts that reached the account
         self.started_at: float | None = None
         self.last_ok_at: float | None = None
 
@@ -91,6 +103,38 @@ class Worker:
     def alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
+    @property
+    def connected(self) -> bool:
+        return self.alive and self.ready
+
+    @property
+    def starting(self) -> bool:
+        return self._starting
+
+    @property
+    def retry_in(self) -> float:
+        """Seconds left before a failed worker may start again; 0 when it may now."""
+        return max(0.0, self._next_try - time.time())
+
+    def start_in_background(self) -> None:
+        """Start the worker on its own thread. A first start can take minutes, and an
+        HTTP caller should not be held for that; it watches ``connected`` instead."""
+        if self._starting:
+            return
+        self._starting = True
+
+        def run() -> None:
+            try:
+                with self._lock:
+                    if not self.alive:
+                        self.start()
+            except Exception:  # start() has recorded why in last_error
+                pass
+            finally:
+                self._starting = False
+
+        threading.Thread(target=run, daemon=True, name=f"start-{self.account.login}").start()
+
     def start(self) -> None:
         """Launch the worker and wait for its ready banner."""
         if self.alive:
@@ -98,7 +142,13 @@ class Worker:
         if time.time() < self._next_try:
             raise WorkerDown(f"{self.account.label}: backing off ({self.last_error})")
         self.ready = False  # a worker that crashed was never stopped
+        self._starting = True
+        try:
+            self._launch()
+        finally:
+            self._starting = False
 
+    def _launch(self) -> None:
         # Setting up the terminal can fail for reasons that will not fix
         # themselves within a second (no MT5 install to copy, a full disk).
         # Those go through the same backoff as a failed login, instead of
@@ -157,6 +207,7 @@ class Worker:
         self._failures = 0
         self.last_error = None
         self.ready = True
+        self.connects += 1
         log.info("worker ready for %s", self.account.label)
 
     def _record_failure(self, message: str) -> None:
@@ -279,6 +330,21 @@ class Pool:
             raise WorkerDown(f"no worker for account {account_id}")
         return worker
 
+    def connected(self, account_id: str) -> Worker:
+        """The account's worker, if its terminal is up.
+
+        Otherwise it is started in the background and TerminalStarting says so at
+        once: a first start can outlast any HTTP timeout, and a request held for it
+        ends only in a confusing timeout. A start that just failed reports why.
+        """
+        worker = self.get(account_id)
+        if worker.connected:
+            return worker
+        if worker.retry_in > 0 and worker.last_error and not worker.starting:
+            raise WorkerDown(f"{worker.account.label}: {worker.last_error}")
+        worker.start_in_background()
+        raise TerminalStarting(STARTING)
+
     def statuses(self) -> dict[str, dict[str, Any]]:
         with self._lock:
             workers = dict(self._workers)
@@ -286,7 +352,9 @@ class Pool:
             account_id: {
                 **worker.account.redacted(),
                 "running": worker.alive,
-                "ready": worker.alive and worker.ready,
+                "ready": worker.connected,
+                "starting": worker.starting,
+                "connects": worker.connects,
                 "lastError": worker.last_error,
                 "lastOkAt": worker.last_ok_at,
                 "startedAt": worker.started_at,

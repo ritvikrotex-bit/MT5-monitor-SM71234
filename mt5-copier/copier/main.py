@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from copier.config import settings
 from copier.engine import Engine, Link
-from copier.pool import Account, CommandFailed, Pool, WorkerDown
+from copier.pool import Account, CommandFailed, Pool, TerminalStarting, WorkerDown
 from copier.rules import SymbolIndex, preview_translation
 from copier.sources import (
     ConnectorClient,
@@ -168,7 +168,9 @@ def get_journal(links: str = "", since: float = 0.0, limit: int = 500) -> dict[s
 def probe(account_id: str) -> dict[str, Any]:
     """Log in and report what the account looks like, without trading."""
     try:
-        return pool.get(account_id).call("snapshot", timeout=settings.snapshot_timeout)
+        return pool.connected(account_id).call("snapshot", timeout=settings.snapshot_timeout)
+    except TerminalStarting as exc:
+        return {"starting": True, "message": str(exc)}
     except WorkerDown as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except CommandFailed as exc:
@@ -180,7 +182,7 @@ def symbols(account_id: str, q: str = "") -> dict[str, Any]:
     """List the symbols this account can trade, so a mapping can be checked
     against what the broker really offers rather than guessed at."""
     try:
-        result = pool.get(account_id).call("symbols", timeout=settings.snapshot_timeout)
+        result = pool.connected(account_id).call("symbols", timeout=settings.snapshot_timeout)
     except WorkerDown as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except CommandFailed as exc:
@@ -201,7 +203,7 @@ def symbol_spec(account_id: str, symbol: str) -> dict[str, Any]:
     the terminal had not pulled into its local list yet.
     """
     try:
-        return pool.get(account_id).call(
+        return pool.connected(account_id).call(
             "spec", {"symbol": symbol}, timeout=settings.snapshot_timeout
         )
     except WorkerDown as exc:
@@ -223,12 +225,12 @@ def preview(link_id: str, q: str = "", limit: int = 400) -> dict[str, Any]:
 
     try:
         if isinstance(link.master, TerminalMaster):
-            source_symbols = pool.get(link.master.account_id).call(
+            source_symbols = pool.connected(link.master.account_id).call(
                 "symbols", timeout=settings.snapshot_timeout
             ).get("symbols") or []
         else:
             source_symbols = manager_symbols(masters.connector, link.master)
-        dest_names = pool.get(link.dest_id).call(
+        dest_names = pool.connected(link.dest_id).call(
             "symbols", timeout=settings.snapshot_timeout
         ).get("symbols") or []
     except SourceUnavailable as exc:
@@ -265,6 +267,14 @@ def test_link(link_id: str) -> dict[str, Any]:
     link = engine.links.get(link_id)
     if link is None:
         raise HTTPException(status_code=404, detail="unknown link")
+    try:
+        pool.connected(link.dest_id)
+        if isinstance(link.master, TerminalMaster):
+            pool.connected(link.master.account_id)
+    except TerminalStarting as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except WorkerDown:
+        pass  # run_test reports a down account as its own failed step
     return run_test(engine, link)
 
 

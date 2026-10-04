@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -226,29 +227,29 @@ def current_session() -> int | None:
 
 _LIST_TERMINALS = (
     "Get-CimInstance Win32_Process -Filter \"Name='terminal64.exe'\" | ForEach-Object { "
-    "'{0}|{1}|{2}' -f $_.ProcessId, "
-    "([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds(), $_.ExecutablePath }"
+    "'{0}|{1}|{2}|{3}' -f $_.ProcessId, "
+    "([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds(), $_.SessionId, $_.ExecutablePath }"
 )
 
 
-def parse_terminal_list(output: str, exe: Path) -> list[tuple[int, float]]:
-    """(pid, start time in epoch seconds) of each listed process running ``exe``."""
+def parse_terminal_list(output: str, exe: Path) -> list[tuple[int, float, int]]:
+    """(pid, start time in epoch seconds, session) of each listed process running ``exe``."""
     target = os.path.normcase(os.path.abspath(exe))
-    found: list[tuple[int, float]] = []
+    found: list[tuple[int, float, int]] = []
     for line in output.splitlines():
-        parts = line.strip().split("|", 2)
-        if len(parts) != 3 or not parts[2]:
+        parts = line.strip().split("|", 3)
+        if len(parts) != 4 or not parts[3]:
             continue  # no path: a process we may not inspect
         try:
-            pid, started_ms = int(parts[0]), float(parts[1])
+            pid, started_ms, session = int(parts[0]), float(parts[1]), int(parts[2])
         except ValueError:
             continue
-        if os.path.normcase(os.path.abspath(parts[2])) == target:
-            found.append((pid, started_ms / 1000.0))
+        if os.path.normcase(os.path.abspath(parts[3])) == target:
+            found.append((pid, started_ms / 1000.0, session))
     return found
 
 
-def running_from(exe: Path) -> list[tuple[int, float]]:
+def running_from(exe: Path) -> list[tuple[int, float, int]]:
     """Every running terminal started from ``exe``, in any Windows session."""
     try:
         result = subprocess.run(
@@ -264,16 +265,17 @@ def running_from(exe: Path) -> list[tuple[int, float]]:
     return parse_terminal_list(result.stdout, exe)
 
 
-def stop_stale(exe: Path, *, started_before: float) -> list[int]:
-    """Close terminals from this account's folder that a previous copier run left behind.
+def stop_stale(exe: Path, *, started_before: float, session: int | None = None) -> list[int]:
+    """Close terminals from this account's folder that the current worker cannot use.
 
-    Stopping a worker does not stop its terminal, and an orphan (or one opened by
-    hand in another Windows session) answers our IPC with a timeout. Anything
-    started after ``started_before`` was launched by the current worker and is kept.
+    That is any started before ``started_before`` (stopping a worker leaves its
+    terminal running), and any in a Windows session other than ``session``: IPC
+    cannot reach it there, and two terminals must not share one folder.
     """
     stopped: list[int] = []
-    for pid, started in running_from(exe):
-        if started >= started_before - 1.0:
+    for pid, started, in_session in running_from(exe):
+        foreign = session is not None and in_session != session
+        if not foreign and started >= started_before - 1.0:
             continue
         try:
             os.kill(pid, 15)  # TerminateProcess on Windows
@@ -281,6 +283,81 @@ def stop_stale(exe: Path, *, started_before: float) -> list[int]:
         except OSError as exc:
             log.warning("could not close leftover terminal %s: %s", pid, exc)
     return stopped
+
+
+# Journal sources that say nothing about why a terminal will not connect.
+_JOURNAL_NOISE = frozenset({"MCP", "Compiler", "HistoryCenter"})
+
+
+def journal_tail(exe: Path, *, since: float, limit: int = 3) -> list[str]:
+    """The terminal's own journal since ``since``: what it was doing when it stopped answering.
+
+    A portable terminal writes ``logs/YYYYMMDD.log`` (local date, UTF-16) next to
+    its executable, one tab-separated line per event: code, level, time, source, text.
+    """
+    start_day = time.strftime("%Y%m%d", time.localtime(since))
+    start_time = time.strftime("%H:%M:%S", time.localtime(since))
+    days = sorted({start_day, time.strftime("%Y%m%d")})
+    picked: list[str] = []
+    for day in days:
+        try:
+            text = (exe.parent / "logs" / f"{day}.log").read_text(encoding="utf-16")
+        except (OSError, UnicodeError):
+            continue
+        for line in text.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 5 or parts[3] in _JOURNAL_NOISE:
+                continue
+            if day == start_day and parts[2][:8] < start_time:
+                continue
+            picked.append(f"{parts[3]}: {parts[4].strip()}")
+    return picked[-limit:]
+
+
+def window_titles(pids: set[int]) -> list[str]:
+    """Titles of the visible windows these processes own, such as a dialog waiting for a click."""
+    titles: list[str] = []
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def visit(hwnd, _lparam):
+            owner = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if owner.value in pids and user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length:
+                    buffer = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buffer, length + 1)
+                    titles.append(buffer.value)
+            return True
+
+        user32.EnumWindows(visit, 0)
+    except (AttributeError, OSError):
+        pass
+    return titles
+
+
+def describe_failure(exe: Path, *, since: float) -> str:
+    """What the terminal itself shows, for an error that otherwise only says 'IPC timeout'."""
+    processes = running_from(exe)
+    if not processes:
+        what = "no terminal process is running from this folder: it closes as soon as it starts"
+    else:
+        what = "terminal running (pid {})".format(", ".join(str(p[0]) for p in processes))
+        titles = window_titles({p[0] for p in processes})
+        if titles:
+            what += "; its windows: " + " | ".join(f'"{t}"' for t in titles[:3])
+    lines = journal_tail(exe, since=since)
+    journal = (
+        "its journal: " + " | ".join(f'"{line}"' for line in lines)
+        if lines
+        else "nothing in its journal since the copier started it"
+    )
+    return f"{what}; {journal}"
 
 
 def launch(exe: Path) -> subprocess.Popen:

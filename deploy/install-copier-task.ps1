@@ -31,15 +31,7 @@ if (Get-Service -Name $CopierTaskName -ErrorAction SilentlyContinue) {
 
 # 2. Stop what the old copier left running, including terminals stranded in session 0.
 Stop-CopierTask
-$terminalsRoot = "C:\mt5-terminals"
-$rootLine = Get-Content $copierEnv | Where-Object { $_ -match '^\s*TERMINALS_ROOT\s*=' } | Select-Object -First 1
-if ($rootLine) { $terminalsRoot = ($rootLine -split '=', 2)[1].Trim().Trim('"') }
-Get-CimInstance Win32_Process -Filter "Name='terminal64.exe'" |
-    Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($terminalsRoot, [StringComparison]::OrdinalIgnoreCase) } |
-    ForEach-Object {
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        Write-Host "closed leftover terminal $($_.ProcessId) (session $($_.SessionId))"
-    }
+Stop-CopierTerminals $AppDir
 
 # 3. At this account's logon, in its desktop session, elevated, restarted if it ever stops.
 $action = New-ScheduledTaskAction -Execute "powershell.exe" `

@@ -129,6 +129,8 @@ type CopierEvent = {
 type WorkerStatus = {
   running: boolean;
   ready?: boolean;
+  starting?: boolean;
+  connects?: number;
   lastError: string | null;
   lastOkAt?: number | null;
   starts?: number;
@@ -182,6 +184,9 @@ type Snapshot = {
   positions: { ticket: number; symbol: string; side: string; volume: number }[];
 };
 
+/** A login check: the account, an error, or word that its terminal is still starting. */
+type ProbeResult = Snapshot | string | { starting: true; message: string };
+
 export const Route = createFileRoute("/copier")({ component: CopierPage });
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -210,7 +215,7 @@ function CopierPage() {
   const [editingAccount, setEditingAccount] = useState<string | null>(null);
   const [addingLink, setAddingLink] = useState(false);
   const [editingLink, setEditingLink] = useState<string | null>(null);
-  const [probe, setProbe] = useState<Record<string, Snapshot | string>>({});
+  const [probe, setProbe] = useState<Record<string, ProbeResult>>({});
   const [workers, setWorkers] = useState<Record<string, WorkerStatus>>({});
   const [tests, setTests] = useState<Record<string, TestResult | string>>({});
 
@@ -505,7 +510,7 @@ function CopierPage() {
                   onProbe={() =>
                     run(`probe-${account.id}`, async () => {
                       try {
-                        const snap = await api<Snapshot>(
+                        const snap = await api<Exclude<ProbeResult, string>>(
                           `/api/copier/accounts/${account.id}/probe`,
                           {
                             method: "POST",
@@ -791,14 +796,16 @@ function AccountRow({
   onDelete,
 }: {
   account: Account;
-  result: Snapshot | string | undefined;
+  result: ProbeResult | undefined;
   worker: WorkerStatus | undefined;
   busy: string | null;
   onProbe: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const restarts = Math.max(0, (worker?.starts ?? 0) - 1);
+  // A failed start is not a recovery: count connections that succeeded (older copiers lack it).
+  const restarts = Math.max(0, (worker?.connects ?? worker?.starts ?? 0) - 1);
+  const starting = Boolean(worker?.starting || (worker?.running && worker.ready === false));
   return (
     <div className="rounded-xl border border-border bg-secondary/40 p-3">
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
@@ -822,19 +829,13 @@ function AccountRow({
             {worker && (
               <Tag
                 tone={
-                  worker.lastError
-                    ? "warn"
-                    : worker.running && worker.ready === false
-                      ? "info"
-                      : worker.running
-                        ? "ok"
-                        : "muted"
+                  starting ? "info" : worker.lastError ? "warn" : worker.running ? "ok" : "muted"
                 }
                 text={
-                  worker.lastError
-                    ? "terminal problem"
-                    : worker.running && worker.ready === false
-                      ? "terminal starting…"
+                  starting
+                    ? "terminal starting…"
+                    : worker.lastError
+                      ? "terminal problem"
                       : worker.running
                         ? "terminal connected"
                         : "terminal idle · starts when needed"
@@ -847,7 +848,7 @@ function AccountRow({
           </div>
           {worker?.lastError && (
             <p className="mt-1.5 text-[11px] break-words text-amber-600 dark:text-amber-400">
-              {worker.lastError}
+              {starting ? `Last attempt: ${worker.lastError}` : worker.lastError}
             </p>
           )}
         </div>
@@ -881,7 +882,12 @@ function AccountRow({
           {result}
         </p>
       )}
-      {result && typeof result !== "string" && (
+      {result && typeof result !== "string" && "starting" in result && (
+        <p className="mt-2 rounded-lg bg-secondary p-2 text-[11px] break-words text-muted-foreground">
+          {result.message}
+        </p>
+      )}
+      {result && typeof result !== "string" && "account" in result && (
         <div className="mt-2 space-y-1 rounded-lg bg-background/60 p-2 text-[11px]">
           <p className="break-words">
             <span className="font-semibold">{result.account.name}</span> · {result.account.company}

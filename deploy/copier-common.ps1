@@ -4,6 +4,31 @@
 
 $CopierTaskName = "MT5MonitorCopier"
 
+# A value from mt5-copier\.env, or the default.
+function Get-CopierSetting($AppDir, $Name, $Default) {
+    $envFile = Join-Path $AppDir "mt5-copier\.env"
+    if (Test-Path $envFile) {
+        $line = Get-Content $envFile | Where-Object { $_ -match "^\s*$Name\s*=" } | Select-Object -First 1
+        if ($line) { return ($line -split '=', 2)[1].Trim().Trim('"') }
+    }
+    return $Default
+}
+
+function Get-TerminalsRoot($AppDir) {
+    return (Get-CopierSetting $AppDir "TERMINALS_ROOT" "C:\mt5-terminals").TrimEnd('\')
+}
+
+# Every terminal the copier provisioned, in any Windows session.
+function Stop-CopierTerminals($AppDir) {
+    $prefix = (Get-TerminalsRoot $AppDir) + '\'
+    Get-CimInstance Win32_Process -Filter "Name='terminal64.exe'" |
+        Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            Write-Host "closed copier terminal $($_.ProcessId) (session $($_.SessionId))"
+        }
+}
+
 function Stop-CopierProcesses {
     # The runner first, or its loop would restart the copier being stopped.
     foreach ($pattern in @("run-copier\.cmd", "copier\.(main:app|worker)")) {

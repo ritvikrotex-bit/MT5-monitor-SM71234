@@ -81,6 +81,10 @@ export type CopierWorkerStatus = {
   running: boolean;
   /** The terminal answered; false while it is still starting. Absent from older copiers. */
   ready?: boolean;
+  /** A start is under way (copying the terminal, or waiting for it to answer). */
+  starting?: boolean;
+  /** Successful connections since the copier started. */
+  connects?: number;
   lastError: string | null;
   /** Seconds since the epoch of the last command the worker answered. */
   lastOkAt?: number | null;
@@ -313,8 +317,13 @@ export async function copierEvents(
   });
 }
 
-export async function probeCopierAccount(accountId: string): Promise<CopierAccountSnapshot> {
-  return call<CopierAccountSnapshot>(`/v1/accounts/${accountId}/probe`, { method: "POST" });
+/** The copier is starting the account's terminal; the probe answers before it is up. */
+export type CopierProbeStarting = { starting: true; message: string };
+
+export async function probeCopierAccount(
+  accountId: string,
+): Promise<CopierAccountSnapshot | CopierProbeStarting> {
+  return call(`/v1/accounts/${accountId}/probe`, { method: "POST" });
 }
 
 export async function copierAccountSymbols(

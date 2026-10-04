@@ -186,6 +186,14 @@ instead. Run it while logged in as the account that keeps that session, then:
 * After a reboot the copier starts when that account logs in. For an unattended
   recovery, enable automatic logon (Sysinternals Autologon).
 
+**An account that will not connect.** The account on the Copier page says why:
+when its terminal does not answer, the error quotes the terminal's own journal
+and any window it is showing. For the full picture run
+`deploy\copier-doctor.ps1` (how the copier runs, each account's last error, the
+MT5 versions, terminal processes and their sessions, journals, the copier log).
+`deploy\copier-doctor.ps1 -Repair` gives every account a fresh terminal folder,
+keeping its server list; the old folder is kept as `<name>.reset-<time>`.
+
 Then, in the app: an administrator turns on **Trade Copier** for the user
 (Admin → Users → permissions). It is off for everyone by default, including
 admins. The user adds a destination account, creates a link picking the

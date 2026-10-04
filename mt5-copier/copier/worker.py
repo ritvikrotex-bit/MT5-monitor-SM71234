@@ -98,6 +98,7 @@ class Terminal:
         self._offset: float | None = None
         self._offset_at = 0.0
         self._started = time.time()
+        self._checked_sessions = False
         self._cleared_stale = False
 
     def server_offset(self) -> float | None:
@@ -124,8 +125,17 @@ class Terminal:
     def connect(self) -> None:
         if self._ready and mt5.terminal_info() is not None:
             return
+        exe = Path(self.terminal)
+        session = terminals.current_session()
+        if not self._checked_sessions and session:  # not from a service session (0)
+            self._checked_sessions = True
+            # One left in another session (say by the old Windows service) can never answer us.
+            stopped = terminals.stop_stale(exe, started_before=0.0, session=session)
+            if stopped:
+                log.warning("closed terminal(s) %s running in another Windows session", stopped)
         ok = False
         error: Any = None
+        code: int | None = None
         # A terminal that has never run takes a couple of minutes to start:
         # it unpacks, fetches the broker's server list and syncs symbols, and
         # answers IPC with -10005 until it is ready. Retry rather than give up.
@@ -148,11 +158,11 @@ class Terminal:
             code = error[0] if isinstance(error, tuple) else None
             if code not in RETRY_CONNECT_CODES:
                 break  # bad password or unknown server: retrying will not help
-            if terminals.current_session() == 0:
+            if session == 0:
                 break  # no desktop in a service session: retrying will not help
             if not self._cleared_stale:
                 self._cleared_stale = True
-                stopped = terminals.stop_stale(Path(self.terminal), started_before=self._started)
+                stopped = terminals.stop_stale(exe, started_before=self._started, session=session)
                 if stopped:
                     log.warning("closed leftover terminal(s) %s that blocked the connection", stopped)
                     continue  # retry at once against a fresh terminal
@@ -161,17 +171,22 @@ class Terminal:
                 time.sleep(5 * (attempt + 1))
         if not ok:
             message = f"initialize failed: {error}"
-            if code in RETRY_CONNECT_CODES and terminals.current_session() == 0:
+            if code in RETRY_CONNECT_CODES and session == 0:
                 message += (
                     ": the copier is running as a Windows service, where MT5 terminals cannot"
                     " start. On the server, run deploy\\install-copier-task.ps1 once so the copier"
                     " runs in the logged-in desktop session"
                 )
             elif code in RETRY_CONNECT_CODES:
+                try:
+                    seen = terminals.describe_failure(exe, since=self._started)
+                except Exception as exc:  # a diagnostic must not hide the real error
+                    seen = f"could not inspect the terminal ({exc})"
                 message += (
-                    ": the MT5 terminal did not answer. Open it once on the server to clear"
-                    " any update or login prompt, close it, then restart the copier"
+                    f": the MT5 terminal did not answer. {seen}. For the full picture run"
+                    " deploy\\copier-doctor.ps1 on the server"
                 )
+                log.error("terminal %s did not answer: %s", exe, seen)
             raise WorkerError("CONNECT_FAILED", message)
         info = mt5.account_info()
         if info is None:
