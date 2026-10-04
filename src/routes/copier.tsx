@@ -128,6 +128,7 @@ type CopierEvent = {
 /** How an account's terminal worker is doing, as the copier reports it. */
 type WorkerStatus = {
   running: boolean;
+  ready?: boolean;
   lastError: string | null;
   lastOkAt?: number | null;
   starts?: number;
@@ -820,13 +821,23 @@ function AccountRow({
             />
             {worker && (
               <Tag
-                tone={worker.lastError ? "warn" : worker.running ? "ok" : "muted"}
+                tone={
+                  worker.lastError
+                    ? "warn"
+                    : worker.running && worker.ready === false
+                      ? "info"
+                      : worker.running
+                        ? "ok"
+                        : "muted"
+                }
                 text={
                   worker.lastError
                     ? "terminal problem"
-                    : worker.running
-                      ? "terminal connected"
-                      : "terminal idle · starts when needed"
+                    : worker.running && worker.ready === false
+                      ? "terminal starting…"
+                      : worker.running
+                        ? "terminal connected"
+                        : "terminal idle · starts when needed"
                 }
               />
             )}

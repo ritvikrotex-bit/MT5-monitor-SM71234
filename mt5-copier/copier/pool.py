@@ -80,6 +80,7 @@ class Worker:
         self._failures = 0
         self._next_try = 0.0
         self.last_error: str | None = None
+        self.ready = False  # the terminal answered; False while it is still starting
         self.starts = 0
         self.started_at: float | None = None
         self.last_ok_at: float | None = None
@@ -96,6 +97,7 @@ class Worker:
             return
         if time.time() < self._next_try:
             raise WorkerDown(f"{self.account.label}: backing off ({self.last_error})")
+        self.ready = False  # a worker that crashed was never stopped
 
         # Setting up the terminal can fail for reasons that will not fix
         # themselves within a second (no MT5 install to copy, a full disk).
@@ -154,6 +156,7 @@ class Worker:
             raise WorkerDown(f"{self.account.label}: {error.get('message')}")
         self._failures = 0
         self.last_error = None
+        self.ready = True
         log.info("worker ready for %s", self.account.label)
 
     def _record_failure(self, message: str) -> None:
@@ -175,6 +178,7 @@ class Worker:
                 log.debug("worker %s emitted non-JSON: %s", self.account.label, line[:200])
 
     def stop(self) -> None:
+        self.ready = False
         proc, self._proc = self._proc, None
         if proc is None:
             return
@@ -282,6 +286,7 @@ class Pool:
             account_id: {
                 **worker.account.redacted(),
                 "running": worker.alive,
+                "ready": worker.alive and worker.ready,
                 "lastError": worker.last_error,
                 "lastOkAt": worker.last_ok_at,
                 "startedAt": worker.started_at,

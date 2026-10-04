@@ -2,8 +2,8 @@
 # after `npm ci`, `npm run build` and creating mt5-connector\.venv (see DEPLOYMENT.md).
 #   powershell -ExecutionPolicy Bypass -File deploy\install-services.ps1 [-AppDir C:\apps\mt5-monitor]
 #
-# The trade copier is optional: it is installed only when mt5-copier\.venv and
-# mt5-copier\.env exist, so an install that does not copy trades is unaffected.
+# The trade copier is not installed here: it runs in the desktop session, via
+# deploy\install-copier-task.ps1.
 param([string]$AppDir = "C:\apps\mt5-monitor")
 
 $ErrorActionPreference = "Stop"
@@ -47,19 +47,12 @@ Install-Service "MT5MonitorConnector" $python "-m uvicorn connector.main:app --h
 Install-Service "MT5MonitorWeb" $node "--env-file=.env .output\server\index.mjs" $AppDir "NODE_ENV=production"
 & $nssm set MT5MonitorWeb DependOnService MT5MonitorConnector | Out-Null
 
-# Trade copier, only if it has been set up. It reads master accounts through
-# the connector, so it depends on that too.
-$copierInstalled = $false
-if ((Test-Path $copierPython) -and (Test-Path (Join-Path $AppDir "mt5-copier\.env"))) {
-    Install-Service "MT5MonitorCopier" $copierPython "-m uvicorn copier.main:app --host 127.0.0.1 --port 8766" (Join-Path $AppDir "mt5-copier") "PYTHONUNBUFFERED=1"
-    & $nssm set MT5MonitorCopier DependOnService MT5MonitorConnector | Out-Null
-    $copierInstalled = $true
-} else {
-    Write-Host "skipped MT5MonitorCopier (no mt5-copier\.venv or mt5-copier\.env); trade copying stays off"
-}
-
 & $nssm start MT5MonitorConnector | Out-Null
-if ($copierInstalled) { & $nssm start MT5MonitorCopier | Out-Null }
 & $nssm start MT5MonitorWeb | Out-Null
 Write-Host "started. Check (PowerShell): Invoke-RestMethod http://127.0.0.1:8765/health ; (Invoke-WebRequest http://127.0.0.1:3000/ -UseBasicParsing).StatusCode"
-if ($copierInstalled) { Write-Host "  copier: Invoke-RestMethod http://127.0.0.1:8766/health" }
+
+# The trade copier is deliberately not a service: MT5 terminals cannot start in a service's
+# session (session 0). install-copier-task.ps1 runs it in the logged-in desktop session.
+if ((Test-Path $copierPython) -and (Test-Path (Join-Path $AppDir "mt5-copier\.env"))) {
+    Write-Host "trade copier: run deploy\install-copier-task.ps1 (desktop session, not a service)"
+}

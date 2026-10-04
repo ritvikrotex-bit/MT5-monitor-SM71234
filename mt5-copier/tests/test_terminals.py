@@ -43,11 +43,14 @@ def test_a_terminal_that_cannot_be_closed_is_not_reported(monkeypatch):
 
 @pytest.fixture
 def fake_mt5(monkeypatch):
-    state = {"initialize": [], "error": (-10005, "IPC timeout"), "stale": [], "sleeps": []}
+    state = {"initialize": [], "error": (-10005, "IPC timeout"), "calls": 0, "sleeps": []}
 
     def initialize(*args, **kwargs):
+        state["calls"] += 1
         results = state["initialize"]
         return results.pop(0) if results else False
+
+    monkeypatch.setattr(worker.terminals, "current_session", lambda: 1)  # a desktop session
 
     monkeypatch.setattr(worker.mt5, "shutdown", lambda: None)
     monkeypatch.setattr(worker.mt5, "initialize", initialize)
@@ -83,6 +86,40 @@ def test_a_terminal_that_never_answers_gets_an_actionable_error(fake_mt5, monkey
 
     assert len(calls) == 1  # cleared once, not on every attempt
     assert "IPC timeout" in str(exc.value) and "did not answer" in str(exc.value)
+
+
+def test_a_service_session_fails_at_once_and_says_why(fake_mt5, monkeypatch):
+    monkeypatch.setattr(worker.terminals, "current_session", lambda: 0)
+    calls: list[Path] = []
+    monkeypatch.setattr(
+        worker.terminals, "stop_stale", lambda exe, started_before: calls.append(exe) or []
+    )
+    term = worker.Terminal(str(EXE), 910102, "pw", "S")
+
+    with pytest.raises(worker.WorkerError) as exc:
+        term.connect()
+
+    assert fake_mt5["calls"] == 1 and fake_mt5["sleeps"] == []  # no 8-minute retry loop
+    assert calls == []
+    assert "Windows service" in str(exc.value) and "install-copier-task.ps1" in str(exc.value)
+
+
+def test_this_process_session_is_readable():
+    assert isinstance(terminals.current_session(), int)
+
+
+def test_a_starting_worker_is_not_reported_as_connected(tmp_path):
+    from copier.pool import Account, Pool
+
+    pool = Pool(tmp_path)
+    pool.set_accounts([Account("a", "Slave", "S", 910102, "pw")])
+    w = pool.get("a")
+    w._proc = SimpleNamespace(poll=lambda: None)  # process up, terminal not answered yet
+
+    assert pool.statuses()["a"]["running"] is True
+    assert pool.statuses()["a"]["ready"] is False
+    w.ready = True
+    assert pool.statuses()["a"]["ready"] is True
 
 
 def test_a_wrong_password_does_not_touch_any_terminal(fake_mt5, monkeypatch):

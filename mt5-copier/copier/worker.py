@@ -148,6 +148,8 @@ class Terminal:
             code = error[0] if isinstance(error, tuple) else None
             if code not in RETRY_CONNECT_CODES:
                 break  # bad password or unknown server: retrying will not help
+            if terminals.current_session() == 0:
+                break  # no desktop in a service session: retrying will not help
             if not self._cleared_stale:
                 self._cleared_stale = True
                 stopped = terminals.stop_stale(Path(self.terminal), started_before=self._started)
@@ -159,7 +161,13 @@ class Terminal:
                 time.sleep(5 * (attempt + 1))
         if not ok:
             message = f"initialize failed: {error}"
-            if code in RETRY_CONNECT_CODES:
+            if code in RETRY_CONNECT_CODES and terminals.current_session() == 0:
+                message += (
+                    ": the copier is running as a Windows service, where MT5 terminals cannot"
+                    " start. On the server, run deploy\\install-copier-task.ps1 once so the copier"
+                    " runs in the logged-in desktop session"
+                )
+            elif code in RETRY_CONNECT_CODES:
                 message += (
                     ": the MT5 terminal did not answer. Open it once on the server to clear"
                     " any update or login prompt, close it, then restart the copier"

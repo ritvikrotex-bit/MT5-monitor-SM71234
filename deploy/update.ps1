@@ -44,11 +44,17 @@ function Start-AppService($name) {
 $dataDir = Join-Path $AppDir "data"
 $backup = Join-Path $AppDir ("logs\data-backup\" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 
+# The copier runs as a scheduled task in the desktop session (install-copier-task.ps1); older
+# installs still have it as a service, where its MT5 terminals cannot start.
+. (Join-Path $PSScriptRoot "copier-common.ps1")
+$copierTask = Get-ScheduledTask -TaskName $CopierTaskName -ErrorAction SilentlyContinue
+$copierService = Get-Service -Name $CopierTaskName -ErrorAction SilentlyContinue
+
 Write-Host "==> stopping services (so nothing writes to data\ mid-update)"
 nssm stop MT5MonitorWeb | Out-Null
 # Stop the copier before the connector: it reads masters through it, and a
 # stopped connector would otherwise log a burst of failed cycles.
-nssm stop MT5MonitorCopier 2>$null | Out-Null
+if ($copierTask) { Stop-CopierTask } else { nssm stop MT5MonitorCopier 2>$null | Out-Null }
 nssm stop MT5MonitorConnector | Out-Null
 $global:LASTEXITCODE = 0   # "service not running" is fine
 
@@ -84,6 +90,11 @@ if ($hasCopier) {
     Step "pip install (copier)" { & $copierPython -m pip install --disable-pip-version-check -r mt5-copier\requirements.txt }
 }
 Start-AppService MT5MonitorConnector
-if ($hasCopier) { Start-AppService MT5MonitorCopier }
+if ($hasCopier -and $copierTask) { Start-CopierTask }
+elseif ($hasCopier -and $copierService) {
+    Start-AppService MT5MonitorCopier
+    Write-Warning ("The copier still runs as a Windows service, where MT5 terminals cannot start " +
+        "(IPC timeout). Run deploy\install-copier-task.ps1 once to move it to this desktop session.")
+}
 Start-AppService MT5MonitorWeb
 Write-Host "deployed $(git rev-parse --short HEAD)"

@@ -168,12 +168,23 @@ Copy-Item mt5-copier\.env.example mt5-copier\.env
 #   CONNECTOR_SECRET = the same value as MT5_CONNECTOR_SECRET in .env
 # and add to the web app's .env:
 #   MT5_COPIER_SECRET = the same value as COPIER_SECRET above
-powershell -ExecutionPolicy Bypass -File deploy\install-services.ps1
+powershell -ExecutionPolicy Bypass -File deploy\install-copier-task.ps1
 Invoke-RestMethod http://127.0.0.1:8766/health
 ```
 
 MetaTrader 5 must be installed on the RDP at `C:\Program Files\MetaTrader 5`;
 each destination terminal is cloned from it.
+
+**The copier is not a Windows service.** An MT5 terminal cannot start in a
+service's session (session 0): the copier there gets `(-10005, 'IPC timeout')`
+for every account. `install-copier-task.ps1` removes any old `MT5MonitorCopier`
+service and runs the copier as a scheduled task in the logged-in RDP session
+instead. Run it while logged in as the account that keeps that session, then:
+
+* **Disconnect** by closing the RDP window. Never **Sign out**: that ends the
+  session, and the copier with it.
+* After a reboot the copier starts when that account logs in. For an unattended
+  recovery, enable automatic logon (Sysinternals Autologon).
 
 Then, in the app: an administrator turns on **Trade Copier** for the user
 (Admin → Users → permissions). It is off for everyone by default, including
@@ -191,9 +202,10 @@ account, ticket and fill. A user with no bot configured simply gets nothing.
 
 ### Running 24/7
 
-`install-services.ps1` registers `MT5MonitorCopier` with automatic start,
-restart-on-exit after 5 seconds, and a dependency on `MT5MonitorConnector`, the
-same as the other two services. Three things make an unattended restart safe:
+The `MT5MonitorCopier` scheduled task starts at logon and runs
+`deploy\run-copier.cmd`, which restarts the copier 5 seconds after any exit and
+logs to `logs\MT5MonitorCopier.*.log`. `update.ps1` stops and restarts it with
+the services. Three things make an unattended restart safe:
 
 * The copier holds no configuration of its own. The web app pushes it at boot
   and re-pushes every 60 seconds, so a copier that restarts alone picks its

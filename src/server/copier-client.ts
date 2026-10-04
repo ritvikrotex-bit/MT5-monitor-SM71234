@@ -79,6 +79,8 @@ export type CopierWorkerStatus = {
   label: string;
   login: number;
   running: boolean;
+  /** The terminal answered; false while it is still starting. Absent from older copiers. */
+  ready?: boolean;
   lastError: string | null;
   /** Seconds since the epoch of the last command the worker answered. */
   lastOkAt?: number | null;

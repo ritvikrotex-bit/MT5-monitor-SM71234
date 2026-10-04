@@ -211,6 +211,19 @@ def provision(server: str, login: int, *, root: Path, source: Path | None = None
     return exe
 
 
+def current_session() -> int | None:
+    """This process's Windows session; 0 is where services run, with no desktop."""
+    try:
+        import ctypes
+
+        session = ctypes.c_ulong()
+        if ctypes.windll.kernel32.ProcessIdToSessionId(os.getpid(), ctypes.byref(session)):
+            return int(session.value)
+    except (AttributeError, OSError):
+        pass
+    return None
+
+
 _LIST_TERMINALS = (
     "Get-CimInstance Win32_Process -Filter \"Name='terminal64.exe'\" | ForEach-Object { "
     "'{0}|{1}|{2}' -f $_.ProcessId, "
