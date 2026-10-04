@@ -341,6 +341,83 @@ def window_titles(pids: set[int]) -> list[str]:
     return titles
 
 
+# Windows a terminal opens that wait for a click, and block the Python API until closed. After
+# updating itself MT5 shows "Welcome to LiveUpdate"; on a server nobody is there to click it.
+BLOCKING_DIALOGS = frozenset({"Welcome to LiveUpdate"})
+
+
+def dialogs_to_close(windows: list[tuple[int, str, str | None]], exe: Path) -> list[int]:
+    """Of (hwnd, title, process path) triples, the blocking dialogs owned by ``exe``."""
+    target = os.path.normcase(os.path.abspath(exe))
+    return [
+        hwnd
+        for hwnd, title, path in windows
+        if title in BLOCKING_DIALOGS and path and os.path.normcase(os.path.abspath(path)) == target
+    ]
+
+
+def visible_windows() -> list[tuple[int, str, str | None]]:
+    """(hwnd, title, owning process path) of every visible titled window on this desktop."""
+    found: list[tuple[int, str, str | None]] = []
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
+
+        def process_path(pid: int) -> str | None:
+            handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not handle:
+                return None
+            try:
+                size = wintypes.DWORD(1024)
+                buffer = ctypes.create_unicode_buffer(size.value)
+                if kernel32.QueryFullProcessImageNameW(handle, 0, buffer, ctypes.byref(size)):
+                    return buffer.value
+                return None
+            finally:
+                kernel32.CloseHandle(handle)
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def visit(hwnd, _lparam):
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length:
+                    buffer = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buffer, length + 1)
+                    owner = wintypes.DWORD()
+                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+                    found.append((int(hwnd), buffer.value, process_path(owner.value)))
+            return True
+
+        user32.EnumWindows(visit, 0)
+    except (AttributeError, OSError):
+        pass
+    return found
+
+
+def dismiss_dialogs(exe: Path) -> int:
+    """Close blocking dialogs this terminal shows; the number closed."""
+    handles = dialogs_to_close(visible_windows(), exe)
+    try:
+        import ctypes
+
+        for hwnd in handles:
+            ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE, as clicking X
+    except (AttributeError, OSError):
+        return 0
+    return len(handles)
+
+
+def keep_dismissing(exe: Path, interval: float = 3.0) -> None:
+    """Run for the worker's lifetime: an update can open a dialog at any time."""
+    while True:
+        closed = dismiss_dialogs(exe)
+        if closed:
+            log.warning("closed %d MT5 dialog(s) blocking %s", closed, exe)
+        time.sleep(interval)
+
+
 def describe_failure(exe: Path, *, since: float) -> str:
     """What the terminal itself shows, for an error that otherwise only says 'IPC timeout'."""
     processes = running_from(exe)

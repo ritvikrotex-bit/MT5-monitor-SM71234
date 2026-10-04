@@ -113,6 +113,16 @@ def test_a_dialog_the_terminal_shows_is_named(tmp_path, monkeypatch):
     assert "pid 51" in text and '"Open an Account"' in text
 
 
+def test_only_this_terminals_blocking_dialog_is_closed():
+    windows = [
+        (1, "Welcome to LiveUpdate", str(EXE)),
+        (2, "910102 - WyncrestCapital-Trade - Netting - EURUSD,H1", str(EXE)),  # main window
+        (3, "Welcome to LiveUpdate", r"C:\Program Files\MetaTrader 5\terminal64.exe"),  # not ours
+        (4, "Welcome to LiveUpdate", None),  # owner unknown
+    ]
+    assert terminals.dialogs_to_close(windows, EXE) == [1]
+
+
 # -- connecting -------------------------------------------------------------
 
 @pytest.fixture

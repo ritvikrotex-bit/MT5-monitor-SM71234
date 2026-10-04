@@ -21,6 +21,7 @@ import argparse
 import json
 import logging
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -658,6 +659,9 @@ def main() -> int:
         return 2
 
     term = Terminal(args.terminal, args.login, password, args.server)
+    threading.Thread(
+        target=terminals.keep_dismissing, args=(Path(args.terminal),), daemon=True, name="dialogs"
+    ).start()
     out = sys.stdout
 
     def reply(payload: dict[str, Any]) -> None:
